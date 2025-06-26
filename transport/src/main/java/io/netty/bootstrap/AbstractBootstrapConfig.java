@@ -28,6 +28,10 @@ import java.util.Map;
 
 /**
  * Exposes the configuration of an {@link AbstractBootstrap}.
+ * AbstractBootstrap 的配置快照类
+ * 提供对 Bootstrap 配置信息的只读访问接口
+ * 方便内部和外部获取当前启动配置，避免直接访问 AbstractBootstrap 的私有字段；
+ * 他和AbstractBootstrap在一个包下 然后AbstractBootstrap包级私有 Config提供公有方法
  */
 public abstract class AbstractBootstrapConfig<B extends AbstractBootstrap<B, C>, C extends Channel> {
 

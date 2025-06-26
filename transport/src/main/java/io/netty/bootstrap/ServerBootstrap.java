@@ -41,10 +41,15 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * {@link Bootstrap} sub-class which allows easy bootstrap of {@link ServerChannel}
- *
+ * new ServerBootstrap()
+ * .group(bossGroup, workerGroup)
+ * .channel(...)
+ * .childHandler(...)
+ * .bind(port);
  */
 public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerChannel> {
 
+    //日志
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(ServerBootstrap.class);
 
     // The order in which child ChannelOptions are applied is important they may depend on each other for validation
@@ -55,7 +60,8 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
     private volatile EventLoopGroup childGroup;
     private volatile ChannelHandler childHandler;
 
-    public ServerBootstrap() { }
+    public ServerBootstrap() {
+    }
 
     private ServerBootstrap(ServerBootstrap bootstrap) {
         super(bootstrap);
@@ -131,6 +137,7 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
         return this;
     }
 
+    //初始化的是主channel 监听的
     @Override
     void init(Channel channel) {
         setChannelOptions(channel, newOptionsArray(), logger);
@@ -144,15 +151,18 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
         final Entry<AttributeKey<?>, Object>[] currentChildAttrs = newAttributesArray(childAttrs);
         final Collection<ChannelInitializerExtension> extensions = getInitializerExtensions();
 
+        //添加一个ChannelInitializer 用于监听 Channel（如 NioServerSocketChannel）
         p.addLast(new ChannelInitializer<Channel>() {
             @Override
             public void initChannel(final Channel ch) {
                 final ChannelPipeline pipeline = ch.pipeline();
                 ChannelHandler handler = config.handler();
                 if (handler != null) {
+                    //用户handler 服务端主channel的handler
                     pipeline.addLast(handler);
                 }
 
+                //异步添加ServerBootstrapAcceptor 避免在注册会调用直接修改pipeline
                 ch.eventLoop().execute(new Runnable() {
                     @Override
                     public void run() {
@@ -163,6 +173,8 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
                 });
             }
         });
+
+        //拓展
         if (!extensions.isEmpty() && channel instanceof ServerChannel) {
             ServerChannel serverChannel = (ServerChannel) channel;
             for (ChannelInitializerExtension extension : extensions) {
@@ -188,6 +200,7 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
         return this;
     }
 
+    //连接接收器
     private static class ServerBootstrapAcceptor extends ChannelInboundHandlerAdapter {
 
         private final EventLoopGroup childGroup;
@@ -220,11 +233,15 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
             };
         }
 
+        //这里是主Channel读到的东东 pipeline.fireChannelRead() 传进去一个Channel 也就是msg 然后后续使用这个Channel收发消息
         @Override
         @SuppressWarnings("unchecked")
         public void channelRead(ChannelHandlerContext ctx, Object msg) {
+
+            //这是一个客户端连接
             final Channel child = (Channel) msg;
 
+            //childHandler 是一个 ChannelInitializer
             child.pipeline().addLast(childHandler);
 
             setChannelOptions(child, childOptions, logger);
@@ -241,6 +258,7 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
             }
 
             try {
+                //注册channel 添加监听
                 childGroup.register(child).addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(ChannelFuture future) throws Exception {

@@ -54,13 +54,17 @@ import java.util.concurrent.ConcurrentHashMap;
  * 也可以确保返回类型是子类型(比较器)
  */
 public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C extends Channel> implements Cloneable {
+
+    //空的
     @SuppressWarnings("unchecked")
     private static final Map.Entry<ChannelOption<?>, Object>[] EMPTY_OPTION_ARRAY = new Map.Entry[0];
     @SuppressWarnings("unchecked")
     private static final Map.Entry<AttributeKey<?>, Object>[] EMPTY_ATTRIBUTE_ARRAY = new Map.Entry[0];
 
     //这其实是bossGroup BootStrap就只有一个他 ServerBootStrap还有一个workerGroup
+    //事件循环组 管理多个EventLoop 每个EventLoop管理多个Channel
     volatile EventLoopGroup group;
+
     @SuppressWarnings("deprecation")
     private volatile ChannelFactory<? extends C> channelFactory;
 
@@ -72,7 +76,9 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     //牺牲少量初始化性能换取简单性
     private final Map<ChannelOption<?>, Object> options = new LinkedHashMap<ChannelOption<?>, Object>();
     private final Map<AttributeKey<?>, Object> attrs = new ConcurrentHashMap<AttributeKey<?>, Object>();
+
     private volatile ChannelHandler handler;
+
     //拓展类加载器 反射创建Channel的时候使用
     private volatile ClassLoader extensionsClassLoader;
 
@@ -249,7 +255,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
 
     /**
      * Create a new {@link Channel} and register it with an {@link EventLoop}.
-     * 创建Channel 注册EventLoop
+     * 创建Channel 注册EventLoop 不是给用户调的
      */
     public ChannelFuture register() {
         validate();
@@ -346,6 +352,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         }
     }
 
+    // 初始化 并且 注册
     final ChannelFuture initAndRegister() {
         Channel channel = null;
         try {
@@ -390,13 +397,16 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         return regFuture;
     }
 
+    //初始化Channel 子类实现
     abstract void init(Channel channel) throws Exception;
 
+    //使用用户指定的类加载器 加载插件
     Collection<ChannelInitializerExtension> getInitializerExtensions() {
         ClassLoader loader = extensionsClassLoader;
         if (loader == null) {
             loader = getClass().getClassLoader();
         }
+        //插件拓展机制
         return ChannelInitializerExtensions.getExtensions().extensions(loader);
     }
 
@@ -425,6 +435,9 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
 
     /**
      * the {@link ChannelHandler} to use for serving the requests.
+     * 传入ChannelInitializer
+     * 配置其 ChannelPipeline的
+     * 设置 boss 线程处理的 ServerChannel 的 handler
      */
     public B handler(ChannelHandler handler) {
         this.handler = ObjectUtil.checkNotNull(handler, "handler");
@@ -496,6 +509,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         return copiedMap(attrs);
     }
 
+    //返回一个不可变Map
     static <K, V> Map<K, V> copiedMap(Map<K, V> map) {
         if (map.isEmpty()) {
             return Collections.emptyMap();

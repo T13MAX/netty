@@ -21,6 +21,7 @@ import io.netty.util.concurrent.Promise;
 
 /**
  * Special {@link ChannelFuture} which is writable.
+ * 比JDK的Future多了addListener()
  */
 public interface ChannelPromise extends ChannelFuture, Promise<Void> {
 

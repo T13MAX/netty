@@ -29,9 +29,13 @@ import java.util.ServiceLoader;
 
 /**
  * The configurable facade that decides what {@link ChannelInitializerExtension}s to load and where to find them.
+ * 扩展加载管理类
  */
 abstract class ChannelInitializerExtensions {
+
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(ChannelInitializerExtensions.class);
+
+    //具体实现类
     private static volatile ChannelInitializerExtensions implementation;
 
     private ChannelInitializerExtensions() {
@@ -70,6 +74,7 @@ abstract class ChannelInitializerExtensions {
      */
     abstract Collection<ChannelInitializerExtension> extensions(ClassLoader cl);
 
+    //空的
     private static final class EmptyExtensions extends ChannelInitializerExtensions {
         @Override
         Collection<ChannelInitializerExtension> extensions(ClassLoader cl) {
@@ -78,9 +83,12 @@ abstract class ChannelInitializerExtensions {
     }
 
     private static final class ServiceLoadingExtensions extends ChannelInitializerExtensions {
+
         private final boolean loadAndCache;
 
+        //弱引用 类加载器
         private WeakReference<ClassLoader> classLoader;
+
         private Collection<ChannelInitializerExtension> extensions;
 
         ServiceLoadingExtensions(boolean loadAndCache) {
@@ -99,16 +107,19 @@ abstract class ChannelInitializerExtensions {
             return extensions;
         }
 
+        //加载
         private static Collection<ChannelInitializerExtension> serviceLoadExtensions(boolean load, ClassLoader cl) {
+
             List<ChannelInitializerExtension> extensions = new ArrayList<ChannelInitializerExtension>();
 
-            ServiceLoader<ChannelInitializerExtension> loader = ServiceLoader.load(
-                    ChannelInitializerExtension.class, cl);
+            //获取 对象是 由 ServiceLoader 自动创建的，使用的是实现类的无参构造函数 必须提供public的空参构造
+            ServiceLoader<ChannelInitializerExtension> loader = ServiceLoader.load(ChannelInitializerExtension.class, cl);
             for (ChannelInitializerExtension extension : loader) {
                 extensions.add(extension);
             }
 
             if (!extensions.isEmpty()) {
+                //排序
                 Collections.sort(extensions, new Comparator<ChannelInitializerExtension>() {
                     @Override
                     public int compare(ChannelInitializerExtension a, ChannelInitializerExtension b) {

@@ -19,6 +19,7 @@ import io.netty.channel.Channel;
 import io.netty.channel.ServerChannel;
 import io.netty.util.concurrent.FastThreadLocal;
 
+//空实现
 public class StubChannelInitializerExtension extends ChannelInitializerExtension {
     static final FastThreadLocal<Channel> lastSeenClientChannel = new FastThreadLocal<Channel>();
     static final FastThreadLocal<Channel> lastSeenListenerChannel = new FastThreadLocal<Channel>();

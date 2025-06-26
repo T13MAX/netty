@@ -18,8 +18,9 @@ package io.netty.util;
 /**
  * Key which can be used to access {@link Attribute} out of the {@link AttributeMap}. Be aware that it is not be
  * possible to have multiple keys with the same name.
+ * 用户自定一属性key
  *
- * @param <T>   the type of the {@link Attribute} which can be accessed via this {@link AttributeKey}.
+ * @param <T> the type of the {@link Attribute} which can be accessed via this {@link AttributeKey}.
  */
 @SuppressWarnings("UnusedDeclaration") // 'T' is used only at compile time
 public final class AttributeKey<T> extends AbstractConstant<AttributeKey<T>> {

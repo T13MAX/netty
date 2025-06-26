@@ -43,6 +43,11 @@ import java.util.Collection;
  *
  * <p>The {@link #bind()} methods are useful in combination with connectionless transports such as datagram (UDP).
  * For regular TCP connections, please use the provided {@link #connect()} methods.</p>
+ * new Bootstrap()
+ * .group(...)
+ * .channel(...)
+ * .handler(...)
+ * .connect(host, port);
  */
 public class Bootstrap extends AbstractBootstrap<Bootstrap, Channel> {
 
@@ -50,11 +55,17 @@ public class Bootstrap extends AbstractBootstrap<Bootstrap, Channel> {
 
     private final BootstrapConfig config = new BootstrapConfig(this);
 
+    //异步解析远程地址
     private ExternalAddressResolver externalResolver;
+
+    //禁用解析器
     private volatile boolean disableResolver;
+
+    //远端地址
     private volatile SocketAddress remoteAddress;
 
-    public Bootstrap() { }
+    public Bootstrap() {
+    }
 
     private Bootstrap(Bootstrap bootstrap) {
         super(bootstrap);
@@ -68,7 +79,6 @@ public class Bootstrap extends AbstractBootstrap<Bootstrap, Channel> {
      *
      * @param resolver the {@link NameResolver} for this {@code Bootstrap}; may be {@code null}, in which case a default
      *                 resolver will be used
-     *
      * @see io.netty.resolver.DefaultAddressResolverGroup
      */
     public Bootstrap resolver(AddressResolverGroup<?> resolver) {
@@ -159,9 +169,12 @@ public class Bootstrap extends AbstractBootstrap<Bootstrap, Channel> {
 
     /**
      * @see #connect()
+     * 解析地址并连接
      */
     private ChannelFuture doResolveAndConnect(final SocketAddress remoteAddress, final SocketAddress localAddress) {
+        //初始化并注册 这里是调用父类方法
         final ChannelFuture regFuture = initAndRegister();
+
         final Channel channel = regFuture.channel();
 
         if (regFuture.isDone()) {
@@ -197,6 +210,7 @@ public class Bootstrap extends AbstractBootstrap<Bootstrap, Channel> {
     private ChannelFuture doResolveAndConnect0(final Channel channel, SocketAddress remoteAddress,
                                                final SocketAddress localAddress, final ChannelPromise promise) {
         try {
+            //不解析 直接连
             if (disableResolver) {
                 doConnect(remoteAddress, localAddress, promise);
                 return promise;
@@ -251,12 +265,12 @@ public class Bootstrap extends AbstractBootstrap<Bootstrap, Channel> {
         return promise;
     }
 
-    private static void doConnect(
-            final SocketAddress remoteAddress, final SocketAddress localAddress, final ChannelPromise connectPromise) {
+    private static void doConnect(final SocketAddress remoteAddress, final SocketAddress localAddress, final ChannelPromise connectPromise) {
 
         // This method is invoked before channelRegistered() is triggered.  Give user handlers a chance to set up
         // the pipeline in its channelRegistered() implementation.
         final Channel channel = connectPromise.channel();
+        //
         channel.eventLoop().execute(new Runnable() {
             @Override
             public void run() {
@@ -270,17 +284,25 @@ public class Bootstrap extends AbstractBootstrap<Bootstrap, Channel> {
         });
     }
 
+    //重写的初始化Channel的方法
     @Override
     void init(Channel channel) {
+        //把handler放进去
         ChannelPipeline p = channel.pipeline();
         p.addLast(config.handler());
 
+        //设置Option
         setChannelOptions(channel, newOptionsArray(), logger);
+
+        //设置Attributes
         setAttributes(channel, newAttributesArray());
+
+        //拓展插件处理Channel
         Collection<ChannelInitializerExtension> extensions = getInitializerExtensions();
         if (!extensions.isEmpty()) {
             for (ChannelInitializerExtension extension : extensions) {
                 try {
+                    //初始化前
                     extension.postInitializeClientChannel(channel);
                 } catch (Exception e) {
                     logger.warn("Exception thrown from postInitializeClientChannel", e);
@@ -333,7 +355,9 @@ public class Bootstrap extends AbstractBootstrap<Bootstrap, Channel> {
 
     /* Holder to avoid NoClassDefFoundError in case netty-resolver dependency is excluded
        (e.g. some address families do not need name resolution) */
+    //封装 可选的 地址解析器
     static final class ExternalAddressResolver {
+        //地址解析
         final AddressResolverGroup<SocketAddress> resolverGroup;
 
         @SuppressWarnings("unchecked")

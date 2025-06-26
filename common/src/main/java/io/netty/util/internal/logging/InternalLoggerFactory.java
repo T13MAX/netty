@@ -32,6 +32,9 @@ import io.netty.util.internal.ObjectUtil;
  * which were loaded after the default factory is changed.  Therefore,
  * {@link #setDefaultFactory(InternalLoggerFactory)} should be called as early
  * as possible and shouldn't be called more than once.
+ * <p>
+ * 这是Netty自定义的日志工厂 用来适配不同的日志框架接口
+ * 按顺序找到可用的 没找到用默认
  */
 public abstract class InternalLoggerFactory {
 

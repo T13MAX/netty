@@ -36,6 +36,9 @@ import io.netty.channel.ServerChannel;
  * Note that this feature will not work for Netty uses that are shaded <em>and relocated</em> into other libraries.
  * The classes in a relocated Netty library are technically distinct and incompatible types. This means the
  * service-loader in non-relocated Netty will not see types from a relocated Netty, and vice versa.
+ * 可扩展接口，用户可以实现它来自定义 Channel 初始化逻辑
+ * 配合SPI使用  SPI是Java提供的一种服务发现机制，允许在运行时通过接口加载用户自定义实现，常用于插件式架构。
+ * 用户实现该接口后，在 META-INF/services/io.netty.bootstrap.ChannelInitializerExtension 文件中注册类名，Netty 会通过类加载器加载这些扩展类。
  */
 public abstract class ChannelInitializerExtension {
     /**

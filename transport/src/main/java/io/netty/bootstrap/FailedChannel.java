@@ -25,6 +25,7 @@ import io.netty.channel.EventLoop;
 
 import java.net.SocketAddress;
 
+//失败Channel
 final class FailedChannel extends AbstractChannel {
     private static final ChannelMetadata METADATA = new ChannelMetadata(false);
     private final ChannelConfig config = new DefaultChannelConfig(this);
