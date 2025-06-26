@@ -50,6 +50,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>When not used in a {@link ServerBootstrap} context, the {@link #bind()} methods are useful for connectionless
  * transports such as datagram (UDP).</p>
+ * 自限定类型 递归类型参数 用于链式调用
+ * 也可以确保返回类型是子类型(比较器)
  */
 public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C extends Channel> implements Cloneable {
     @SuppressWarnings("unchecked")
@@ -57,16 +59,21 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     @SuppressWarnings("unchecked")
     private static final Map.Entry<AttributeKey<?>, Object>[] EMPTY_ATTRIBUTE_ARRAY = new Map.Entry[0];
 
+    //这其实是bossGroup BootStrap就只有一个他 ServerBootStrap还有一个workerGroup
     volatile EventLoopGroup group;
     @SuppressWarnings("deprecation")
     private volatile ChannelFactory<? extends C> channelFactory;
+
+    //本地地址
     private volatile SocketAddress localAddress;
 
     // The order in which ChannelOptions are applied is important they may depend on each other for validation
     // purposes.
+    //牺牲少量初始化性能换取简单性
     private final Map<ChannelOption<?>, Object> options = new LinkedHashMap<ChannelOption<?>, Object>();
     private final Map<AttributeKey<?>, Object> attrs = new ConcurrentHashMap<AttributeKey<?>, Object>();
     private volatile ChannelHandler handler;
+    //拓展类加载器 反射创建Channel的时候使用
     private volatile ClassLoader extensionsClassLoader;
 
     AbstractBootstrap() {
@@ -78,6 +85,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         channelFactory = bootstrap.channelFactory;
         handler = bootstrap.handler;
         localAddress = bootstrap.localAddress;
+
         synchronized (bootstrap.options) {
             options.putAll(bootstrap.options);
         }
@@ -107,8 +115,10 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
      * The {@link Class} which is used to create {@link Channel} instances from.
      * You either use this or {@link #channelFactory(io.netty.channel.ChannelFactory)} if your
      * {@link Channel} implementation has no no-args constructor.
+     * 使用什么Channel 比如EpollServerSocketChannel NioServerSocketChannel
      */
     public B channel(Class<? extends C> channelClass) {
+        //包裹一下Channel的Class
         return channelFactory(new ReflectiveChannelFactory<C>(
                 ObjectUtil.checkNotNull(channelClass, "channelClass")
         ));
@@ -135,7 +145,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
      * has a no-args constructor, its highly recommend to just use {@link #channel(Class)} to
      * simplify your code.
      */
-    @SuppressWarnings({ "unchecked", "deprecation" })
+    @SuppressWarnings({"unchecked", "deprecation"})
     public B channelFactory(io.netty.channel.ChannelFactory<? extends C> channelFactory) {
         return channelFactory((ChannelFactory<C>) channelFactory);
     }
@@ -215,6 +225,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     /**
      * Validate all the parameters. Sub-classes may override this, but should
      * call the super method in that case.
+     * 校验参数 执行某些参数的时候 会调用
      */
     public B validate() {
         if (group == null) {
@@ -230,6 +241,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
      * Returns a deep clone of this bootstrap which has the identical configuration.  This method is useful when making
      * multiple {@link Channel}s with similar settings.  Please note that this method does not clone the
      * {@link EventLoopGroup} deeply but shallowly, making the group a shared resource.
+     * 克隆 子类使用的是拷贝构造器
      */
     @Override
     @SuppressWarnings("CloneDoesntDeclareCloneNotSupportedException")
@@ -237,6 +249,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
 
     /**
      * Create a new {@link Channel} and register it with an {@link EventLoop}.
+     * 创建Channel 注册EventLoop
      */
     public ChannelFuture register() {
         validate();
@@ -245,6 +258,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
 
     /**
      * Create a new {@link Channel} and bind it.
+     * 创建一个Channel 然后绑定到本地
      */
     public ChannelFuture bind() {
         validate();
@@ -285,24 +299,36 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     }
 
     private ChannelFuture doBind(final SocketAddress localAddress) {
+
+        //初始化并注册Channel 这是异步的 所以下面要isDone去判断 这里面会触发channelRegistered
         final ChannelFuture regFuture = initAndRegister();
+        //拿到注册的Channel
         final Channel channel = regFuture.channel();
+
+        //判断是否成功
         if (regFuture.cause() != null) {
             return regFuture;
         }
 
+        //已经OK了
         if (regFuture.isDone()) {
             // At this point we know that the registration was complete and successful.
+            //创建绑定该 Channel 的 ChannelPromise
             ChannelPromise promise = channel.newPromise();
+            //本地绑定
             doBind0(regFuture, channel, localAddress, promise);
             return promise;
         } else {
             // Registration future is almost always fulfilled already, but just in case it's not.
             final PendingRegistrationPromise promise = new PendingRegistrationPromise(channel);
+            //添加一个监听
             regFuture.addListener(new ChannelFutureListener() {
                 @Override
                 public void operationComplete(ChannelFuture future) throws Exception {
+
                     Throwable cause = future.cause();
+
+                    //判断是不是有问题
                     if (cause != null) {
                         // Registration on the EventLoop failed so fail the ChannelPromise directly to not cause an
                         // IllegalStateException once we try to access the EventLoop of the Channel.
@@ -323,9 +349,12 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     final ChannelFuture initAndRegister() {
         Channel channel = null;
         try {
+            //新建一个Channel
             channel = channelFactory.newChannel();
+            //初始化Channel
             init(channel);
         } catch (Throwable t) {
+            //异常处理 返回DefaultChannelPromise 如果有channel就返回
             if (channel != null) {
                 // channel can be null if newChannel crashed (eg SocketException("too many open files"))
                 channel.unsafe().closeForcibly();
@@ -336,11 +365,15 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
             return new DefaultChannelPromise(new FailedChannel(), GlobalEventExecutor.INSTANCE).setFailure(t);
         }
 
+        //将Channel注册到EventLoopGroup 这里面会调用pipeline.fireChannelRegistered(); 而bind操作会在更后面执行
         final ChannelFuture regFuture = config().group().register(channel);
         if (regFuture.cause() != null) {
+            //根据是否已经注册 选择使用异步还是同步
             if (channel.isRegistered()) {
+                //异步
                 channel.close();
             } else {
+                //同步
                 channel.unsafe().closeForcibly();
             }
         }
@@ -367,18 +400,23 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
         return ChannelInitializerExtensions.getExtensions().extensions(loader);
     }
 
-    private static void doBind0(
-            final ChannelFuture regFuture, final Channel channel,
-            final SocketAddress localAddress, final ChannelPromise promise) {
+    //执行doBind0之前 channelRegistered已经执行
+    private static void doBind0(final ChannelFuture regFuture, final Channel channel, final SocketAddress localAddress, final ChannelPromise promise) {
 
+        //channelRegistered() 是在 Channel 注册成功之后调用的事件回调
+        //有些用户会在自己的 handler 的 channelRegistered() 方法里设置 pipeline（添加 handler 等）
+        //为了确保这类设置能生效，Netty 在调用 channelRegistered() 之前，先把 bind() 操作安排进 EventLoop 的任务队列中；
         // This method is invoked before channelRegistered() is triggered.  Give user handlers a chance to set up
         // the pipeline in its channelRegistered() implementation.
+        //bind操作 要在Channel所在的线程(EventLoop)上执行
         channel.eventLoop().execute(new Runnable() {
             @Override
             public void run() {
                 if (regFuture.isSuccess()) {
+                    //绑定端口 里面会处理promise
                     channel.bind(localAddress, promise).addListener(ChannelFutureListener.CLOSE_ON_FAILURE);
                 } else {
+                    //失败
                     promise.setFailure(regFuture.cause());
                 }
             }
@@ -466,7 +504,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     }
 
     static void setAttributes(Channel channel, Map.Entry<AttributeKey<?>, Object>[] attrs) {
-        for (Map.Entry<AttributeKey<?>, Object> e: attrs) {
+        for (Map.Entry<AttributeKey<?>, Object> e : attrs) {
             @SuppressWarnings("unchecked")
             AttributeKey<Object> key = (AttributeKey<Object>) e.getKey();
             channel.attr(key).set(e.getValue());
@@ -475,7 +513,7 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
 
     static void setChannelOptions(
             Channel channel, Map.Entry<ChannelOption<?>, Object>[] options, InternalLogger logger) {
-        for (Map.Entry<ChannelOption<?>, Object> e: options) {
+        for (Map.Entry<ChannelOption<?>, Object> e : options) {
             setChannelOption(channel, e.getKey(), e.getValue(), logger);
         }
     }
@@ -496,11 +534,17 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B, C>, C ext
     @Override
     public String toString() {
         StringBuilder buf = new StringBuilder()
-            .append(StringUtil.simpleClassName(this))
-            .append('(').append(config()).append(')');
+                .append(StringUtil.simpleClassName(this))
+                .append('(').append(config()).append(')');
         return buf.toString();
     }
 
+    /**
+     * 专门用于 Channel注册尚未完成时的Promise
+     *
+     * @Author: t13max
+     * @Since: 8:34 2025/6/26
+     */
     static final class PendingRegistrationPromise extends DefaultChannelPromise {
 
         // Is set to the correct EventExecutor once the registration was successful. Otherwise it will
