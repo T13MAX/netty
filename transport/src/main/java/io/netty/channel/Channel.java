@@ -73,6 +73,7 @@ import java.net.SocketAddress;
  * It is important to call {@link #close()} or {@link #close(ChannelPromise)} to release all
  * resources once you are done with the {@link Channel}. This ensures all resources are
  * released in a proper way, i.e. filehandles.
+ * 连接到网络套接字或能够具有读，写，连接和绑定等IO操作的组件。
  */
 public interface Channel extends AttributeMap, ChannelOutboundInvoker, Comparable<Channel> {
 
@@ -90,7 +91,7 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, Comparabl
      * Returns the parent of this channel.
      *
      * @return the parent channel.
-     *         {@code null} if this channel does not have a parent channel.
+     * {@code null} if this channel does not have a parent channel.
      */
     Channel parent();
 
@@ -126,7 +127,7 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, Comparabl
      * information.
      *
      * @return the local address of this channel.
-     *         {@code null} if this channel is not bound.
+     * {@code null} if this channel is not bound.
      */
     SocketAddress localAddress();
 
@@ -137,12 +138,12 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, Comparabl
      * information.
      *
      * @return the remote address of this channel.
-     *         {@code null} if this channel is not connected.
-     *         If this channel is not connected but it can receive messages
-     *         from arbitrary remote addresses (e.g. {@link DatagramChannel},
-     *         use {@link DatagramPacket#recipient()} to determine
-     *         the origination of the received message as this method will
-     *         return {@code null}.
+     * {@code null} if this channel is not connected.
+     * If this channel is not connected but it can receive messages
+     * from arbitrary remote addresses (e.g. {@link DatagramChannel},
+     * use {@link DatagramPacket#recipient()} to determine
+     * the origination of the received message as this method will
+     * return {@code null}.
      */
     SocketAddress remoteAddress();
 
@@ -157,7 +158,7 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, Comparabl
      * requested write operation immediately.  Any write requests made when
      * this method returns {@code false} are queued until the I/O thread is
      * ready to process the queued write requests.
-     *
+     * <p>
      * {@link WriteBufferWaterMark} can be used to configure on which condition
      * the write buffer would cause this channel to change writability.
      */
@@ -169,7 +170,7 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, Comparabl
     /**
      * Get how many bytes can be written until {@link #isWritable()} returns {@code false}.
      * This quantity will always be non-negative. If {@link #isWritable()} is {@code false} then 0.
-     *
+     * <p>
      * {@link WriteBufferWaterMark} can be used to define writability settings.
      */
     default long bytesBeforeUnwritable() {
@@ -182,7 +183,7 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, Comparabl
     /**
      * Get how many bytes must be drained from underlying buffers until {@link #isWritable()} returns {@code true}.
      * This quantity will always be non-negative. If {@link #isWritable()} is {@code true} then 0.
-     *
+     * <p>
      * {@link WriteBufferWaterMark} can be used to define writability settings.
      */
     default long bytesBeforeWritable() {
@@ -369,6 +370,7 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, Comparabl
      *   <li>{@link #deregister(ChannelPromise)}</li>
      *   <li>{@link #voidPromise()}</li>
      * </ul>
+     * 提供底层不安全操作 只允许Netty内部调用
      */
     interface Unsafe {
 
@@ -406,7 +408,7 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, Comparabl
          * Connect the {@link Channel} of the given {@link ChannelFuture} with the given remote {@link SocketAddress}.
          * If a specific local {@link SocketAddress} should be used it need to be given as argument. Otherwise just
          * pass {@code null} to it.
-         *
+         * <p>
          * The {@link ChannelPromise} will get notified once the connect operation was complete.
          */
         void connect(SocketAddress remoteAddress, SocketAddress localAddress, ChannelPromise promise);

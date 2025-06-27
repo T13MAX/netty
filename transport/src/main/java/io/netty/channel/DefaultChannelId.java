@@ -35,6 +35,7 @@ import static io.netty.util.internal.PlatformDependent.BIG_ENDIAN_NATIVE_ORDER;
 
 /**
  * The default {@link ChannelId} implementation.
+ * ChannelId工具类 生辰ChannelId
  */
 public final class DefaultChannelId implements ChannelId {
 
@@ -55,10 +56,10 @@ public final class DefaultChannelId implements ChannelId {
      */
     public static DefaultChannelId newInstance() {
         return new DefaultChannelId(MACHINE_ID,
-                                    PROCESS_ID,
-                                    nextSequence.getAndIncrement(),
-                                    Long.reverse(System.nanoTime()) ^ System.currentTimeMillis(),
-                                    ThreadLocalRandom.current().nextInt());
+                PROCESS_ID,
+                nextSequence.getAndIncrement(),
+                Long.reverse(System.nanoTime()) ^ System.currentTimeMillis(),
+                ThreadLocalRandom.current().nextInt());
     }
 
     static {
@@ -173,7 +174,7 @@ public final class DefaultChannelId implements ChannelId {
 
         if (pid < 0) {
             pid = ThreadLocalRandom.current().nextInt();
-            logger.warn("Failed to find the current process ID from '{}'; using a random value: {}",  value, pid);
+            logger.warn("Failed to find the current process ID from '{}'; using a random value: {}", value, pid);
         }
 
         return pid;
@@ -198,7 +199,7 @@ public final class DefaultChannelId implements ChannelId {
      * Visible for testing
      */
     DefaultChannelId(final byte[] machineId, final int processId, final int sequence,
-                             final long timestamp, final int random) {
+                     final long timestamp, final int random) {
         final byte[] data = new byte[machineId.length + PROCESS_ID_LEN + SEQUENCE_LEN + TIMESTAMP_LEN + RANDOM_LEN];
         int i = 0;
 

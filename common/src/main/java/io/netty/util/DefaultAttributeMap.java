@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
  * Default {@link AttributeMap} implementation which not exibit any blocking behaviour on attribute lookup while using a
  * copy-on-write approach on the modify path.<br> Attributes lookup and remove exibit {@code O(logn)} time worst-case
  * complexity, hence {@code attribute::set(null)} is to be preferred to {@code remove}.
+ * 带用户自定义数据的默认实现
  */
 public class DefaultAttributeMap implements AttributeMap {
 

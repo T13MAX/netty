@@ -23,6 +23,14 @@ import io.netty.util.internal.UnstableApi;
 
 import java.util.concurrent.TimeUnit;
 
+/**
+ * 一个特殊的Promise实现
+ * 用于不关心结果的异步操作
+ * void不就是没返回值嘛~
+ *
+ * @Author: t13max
+ * @Since: 8:19 2025/6/27
+ */
 @UnstableApi
 public final class VoidChannelPromise extends AbstractFuture<Void> implements ChannelPromise {
 
