@@ -57,52 +57,83 @@ import static io.netty.channel.ChannelHandlerMask.MASK_USER_EVENT_TRIGGERED;
 import static io.netty.channel.ChannelHandlerMask.MASK_WRITE;
 import static io.netty.channel.ChannelHandlerMask.mask;
 
+/**
+ * 上下文
+ * 双向链表 向下/前一个handler传递事件
+ * 一个handler对应一个
+ * 可以在任意handler操作channel 拿到channel pipeline
+ * 绑定属性 调度任务 缓存handler状态(handler是单例 上下文保存私有状态)
+ *
+ * @Author: t13max
+ * @Since: 7:42 2025/6/30
+ */
 abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, ResourceLeakHint {
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(AbstractChannelHandlerContext.class);
+
+    //双向链表 事件向后传
     volatile AbstractChannelHandlerContext next;
+
+    //向前传
     volatile AbstractChannelHandlerContext prev;
 
-    private static final AtomicIntegerFieldUpdater<AbstractChannelHandlerContext> HANDLER_STATE_UPDATER =
-            AtomicIntegerFieldUpdater.newUpdater(AbstractChannelHandlerContext.class, "handlerState");
+    //原子更新某个类中的int字段 (AtomicInteger更占空间
+    private static final AtomicIntegerFieldUpdater<AbstractChannelHandlerContext> HANDLER_STATE_UPDATER = AtomicIntegerFieldUpdater.newUpdater(AbstractChannelHandlerContext.class, "handlerState");
 
     /**
      * {@link ChannelHandler#handlerAdded(ChannelHandlerContext)} is about to be called.
+     * 即将调用 handlerAdded()（已加入 pipeline，但还没调用回调）
      */
     private static final int ADD_PENDING = 1;
     /**
      * {@link ChannelHandler#handlerAdded(ChannelHandlerContext)} was called.
+     * handlerAdded() 已被调用，handler 正式可用了
      */
     private static final int ADD_COMPLETE = 2;
     /**
      * {@link ChannelHandler#handlerRemoved(ChannelHandlerContext)} was called.
+     * handlerRemoved() 已调用，handler 被移除了，不再处理事件
      */
     private static final int REMOVE_COMPLETE = 3;
     /**
      * Neither {@link ChannelHandler#handlerAdded(ChannelHandlerContext)}
      * nor {@link ChannelHandler#handlerRemoved(ChannelHandlerContext)} was called.
+     * 初始状态，handlerAdded() 和 handlerRemoved() 都未调用
      */
     private static final int INIT = 0;
 
+    //[pipeline
     private final DefaultChannelPipeline pipeline;
+
+    //name
     private final String name;
+
+    //表示是否在同一个线程顺序执行
     private final boolean ordered;
+
+    //支持的事件类型 位掩码 快速判断 某个事件（如 read、write、flush 等）是否要传递给这个 handler
     private final int executionMask;
 
-    // Will be set to null if no child executor should be used, otherwise it will be set to the
-    // child executor.
+    // Will be set to null if no child executor should be used, otherwise it will be set to the child executor.
+    //是否用户自定义了线程池
     final EventExecutor childExecutor;
+
     // Cache the concrete value for the executor() method. This method is in the hot-path,
     // and it's a profitable optimisation to avoid as many dependent-loads as possible.
     // It does not need to be volatile, because it's always the same value for a given context,
     // within the lifetime of its registration with an event loop, and deregistering will clear it.
+    //真正执行handler的线程池
     EventExecutor contextExecutor;
+
+    //快速返回一个“成功完成”的未来结果
     private ChannelFuture succeededFuture;
 
     // Lazily instantiated tasks used to trigger events to a handler with different executor.
     // There is no need to make this volatile as at worse it will just create a few more instances then needed.
+    //待执行的任务集合
     private Tasks invokeTasks;
 
+    //一开始是init
     private volatile int handlerState = INIT;
 
     AbstractChannelHandlerContext(DefaultChannelPipeline pipeline, EventExecutor executor,
@@ -112,6 +143,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         childExecutor = executor;
         executionMask = mask(handlerClass);
         // Its ordered if its driven by the EventLoop or the given Executor is an instanceof OrderedEventExecutor.
+        //executor为空则为EventLoop 默认有序 或者是一个实现了OrderedEventExecutor的 则有序
         ordered = executor == null || executor instanceof OrderedEventExecutor;
     }
 
@@ -132,8 +164,11 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
 
     @Override
     public EventExecutor executor() {
+
+        //真正执行的handler的线程池
         EventExecutor ex = contextExecutor;
         if (ex == null) {
+            //默认是EventLoop 用户自定义则childExecutor有值
             contextExecutor = ex = childExecutor != null ? childExecutor : channel().eventLoop();
         }
         return ex;
@@ -291,14 +326,14 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
             } catch (Throwable error) {
                 if (logger.isDebugEnabled()) {
                     logger.debug(
-                        "An exception " +
-                        "was thrown by a user handler's exceptionCaught() " +
-                        "method while handling the following exception:", cause);
+                            "An exception " +
+                                    "was thrown by a user handler's exceptionCaught() " +
+                                    "method while handling the following exception:", cause);
                 } else if (logger.isWarnEnabled()) {
                     logger.warn(
-                        "An exception '{}' [enable DEBUG level for full stacktrace] " +
-                        "was thrown by a user handler's exceptionCaught() " +
-                        "method while handling the following exception:", error, cause);
+                            "An exception '{}' [enable DEBUG level for full stacktrace] " +
+                                    "was thrown by a user handler's exceptionCaught() " +
+                                    "method while handling the following exception:", error, cause);
                 }
             }
         } else {
@@ -890,6 +925,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     public ChannelFuture newSucceededFuture() {
         ChannelFuture succeededFuture = this.succeededFuture;
         if (succeededFuture == null) {
+            //为空则新建 否则快速返回 防止重复新建
             this.succeededFuture = succeededFuture = new SucceededChannelFuture(channel(), executor());
         }
         return succeededFuture;
@@ -935,6 +971,12 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         return false;
     }
 
+    /**
+     * 根据mask遍历查找Inbound上下文
+     *
+     * @Author: t13max
+     * @Since: 8:25 2025/6/30
+     */
     private AbstractChannelHandlerContext findContextInbound(int mask) {
         AbstractChannelHandlerContext ctx = this;
         EventExecutor currentExecutor = executor();
@@ -944,6 +986,12 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         return ctx;
     }
 
+    /**
+     * 根据mask遍历查找Outbound上下文
+     *
+     * @Author: t13max
+     * @Since: 8:25 2025/6/30
+     */
     private AbstractChannelHandlerContext findContextOutbound(int mask) {
         AbstractChannelHandlerContext ctx = this;
         EventExecutor currentExecutor = executor();
@@ -953,14 +1001,24 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         return ctx;
     }
 
-    private static boolean skipContext(
-            AbstractChannelHandlerContext ctx, EventExecutor currentExecutor, int mask, int onlyMask) {
+    /**
+     * 是否需要跳过这个上下文
+     *
+     * @Author: t13max
+     * @Since: 8:25 2025/6/30
+     */
+    private static boolean skipContext(AbstractChannelHandlerContext ctx, EventExecutor currentExecutor, int mask, int onlyMask) {
         // Ensure we correctly handle MASK_EXCEPTION_CAUGHT which is not included in the MASK_EXCEPTION_CAUGHT
+        //如果当前 handler 的 executionMask 不包含 (onlyMask | mask) 中的任何一个事件，跳过
         return (ctx.executionMask & (onlyMask | mask)) == 0 ||
                 // We can only skip if the EventExecutor is the same as otherwise we need to ensure we offload
                 // everything to preserve ordering.
                 //
                 // See https://github.com/netty/netty/issues/10067
+                // 如果当前 handler 绑定的 executor 和当前执行线程相同，并且 executionMask 不包含 mask 事件，也跳过
+                //Netty允许给不同的Handler指定不同的EventExecutor（线程池），
+                // 这样同一个Channel的不同Handler可能运行在不同线程上，造成不在同一线程的情况。
+                // 这样设计方便用户自定义线程模型，提升灵活性和性能，但也带来了线程切换和同步的复杂性
                 (ctx.executor() == currentExecutor && (ctx.executionMask & mask) == 0);
     }
 
@@ -974,7 +1032,8 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     }
 
     final boolean setAddComplete() {
-        for (;;) {
+        //死循环是为了确保在多线程竞争下最终能成功修改状态，保证原子性和线程安全
+        for (; ; ) {
             int oldState = handlerState;
             if (oldState == REMOVE_COMPLETE) {
                 return false;
@@ -988,6 +1047,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         }
     }
 
+    //调用时 状态一定是init
     final void setAddPending() {
         boolean updated = HANDLER_STATE_UPDATER.compareAndSet(this, INIT, ADD_PENDING);
         assert updated; // This should always be true as it MUST be called before setAddComplete() or setRemoved().
@@ -1016,7 +1076,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     /**
      * Makes best possible effort to detect if {@link ChannelHandler#handlerAdded(ChannelHandlerContext)} was called
      * yet. If not return {@code false} and if called or could not detect return {@code true}.
-     *
+     * <p>
      * If this method returns {@code false} we will not invoke the {@link ChannelHandler} but just forward the event.
      * This is needed as {@link DefaultChannelPipeline} may already put the {@link ChannelHandler} in the linked-list
      * but not called {@link ChannelHandler#handlerAdded(ChannelHandlerContext)}.
@@ -1043,7 +1103,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     }
 
     private static boolean safeExecute(EventExecutor executor, Runnable runnable,
-            ChannelPromise promise, Object msg, boolean lazy) {
+                                       ChannelPromise promise, Object msg, boolean lazy) {
         try {
             if (lazy && executor instanceof AbstractEventExecutor) {
                 ((AbstractEventExecutor) executor).lazyExecute(runnable);
@@ -1090,7 +1150,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         });
 
         static WriteTask newInstance(AbstractChannelHandlerContext ctx,
-                Object msg, ChannelPromise promise, boolean flush) {
+                                     Object msg, ChannelPromise promise, boolean flush) {
             WriteTask task = RECYCLER.get();
             init(task, ctx, msg, promise, flush);
             return task;
@@ -1114,7 +1174,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         }
 
         static void init(WriteTask task, AbstractChannelHandlerContext ctx,
-                                   Object msg, ChannelPromise promise, boolean flush) {
+                         Object msg, ChannelPromise promise, boolean flush) {
             task.ctx = ctx;
             task.msg = msg;
             task.promise = promise;
@@ -1163,6 +1223,12 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         }
     }
 
+    /**
+     * 存放和管理延迟执行的事件处理任务的结构
+     *
+     * @Author: t13max
+     * @Since: 8:12 2025/6/30
+     */
     static final class Tasks {
         final Runnable invokeChannelReadCompleteTask;
         private final Runnable invokeReadTask;
