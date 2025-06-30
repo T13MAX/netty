@@ -181,18 +181,23 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
 
     @Override
     public ChannelHandlerContext fireChannelRegistered() {
+        //找到下一个实现了Registered的ctx
         AbstractChannelHandlerContext next = findContextInbound(MASK_CHANNEL_REGISTERED);
+        //在EventLoop内则直接执行
         if (next.executor().inEventLoop()) {
+
             if (next.invokeHandler()) {
                 try {
                     // DON'T CHANGE
                     // Duplex handlers implements both out/in interfaces causing a scalability issue
                     // see https://bugs.openjdk.org/browse/JDK-8180450
                     final ChannelHandler handler = next.handler();
+                    //拿到头结点
                     final DefaultChannelPipeline.HeadContext headContext = pipeline.head;
                     if (handler == headContext) {
                         headContext.channelRegistered(next);
                     } else if (handler instanceof ChannelInboundHandlerAdapter) {
+                        //Adapter 是抽象类，单独判断可以省一次接口查找（小性能优化）；
                         ((ChannelInboundHandlerAdapter) handler).channelRegistered(next);
                     } else {
                         ((ChannelInboundHandler) handler).channelRegistered(next);
@@ -201,9 +206,11 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
                     next.invokeExceptionCaught(t);
                 }
             } else {
+                //跳过 防止半初始化状态执行
                 next.fireChannelRegistered();
             }
         } else {
+            //不在EventLoop内则提交
             next.executor().execute(this::fireChannelRegistered);
         }
         return this;
@@ -1080,10 +1087,12 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
      * If this method returns {@code false} we will not invoke the {@link ChannelHandler} but just forward the event.
      * This is needed as {@link DefaultChannelPipeline} may already put the {@link ChannelHandler} in the linked-list
      * but not called {@link ChannelHandler#handlerAdded(ChannelHandlerContext)}.
+     * 检测是否允许调用ChannelHandler
      */
     boolean invokeHandler() {
         // Store in local variable to reduce volatile reads.
         int handlerState = this.handlerState;
+        //添加完成 or (!ordered and 还没添加完) 无需执行时 不要求handler完全加入pipeline执行
         return handlerState == ADD_COMPLETE || (!ordered && handlerState == ADD_PENDING);
     }
 
@@ -1102,10 +1111,16 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         return channel().hasAttr(key);
     }
 
-    private static boolean safeExecute(EventExecutor executor, Runnable runnable,
-                                       ChannelPromise promise, Object msg, boolean lazy) {
+    /**
+     * 安全提交任务
+     *
+     * @Author t13max
+     * @Date 11:35 2025/6/30
+     */
+    private static boolean safeExecute(EventExecutor executor, Runnable runnable, ChannelPromise promise, Object msg, boolean lazy) {
         try {
             if (lazy && executor instanceof AbstractEventExecutor) {
+                //使用懒执行（性能优化）可以稍微延迟任务调度，降低线程切换频率（提升性能）。里面会addTask(task)
                 ((AbstractEventExecutor) executor).lazyExecute(runnable);
             } else {
                 executor.execute(runnable);
@@ -1141,7 +1156,16 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
         return tasks;
     }
 
+    /**
+     * 延迟执行write的出站写任务
+     *
+     * @Author t13max
+     * @Date 11:39 2025/6/30
+     */
+    // 写操作任务类，用于延迟执行 write 和 flush 操作
     static final class WriteTask implements Runnable {
+
+        // WriteTask 的对象池（避免频繁创建销毁）
         private static final ObjectPool<WriteTask> RECYCLER = ObjectPool.newPool(new ObjectCreator<WriteTask>() {
             @Override
             public WriteTask newObject(Handle<WriteTask> handle) {
@@ -1149,73 +1173,89 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
             }
         });
 
-        static WriteTask newInstance(AbstractChannelHandlerContext ctx,
-                                     Object msg, ChannelPromise promise, boolean flush) {
-            WriteTask task = RECYCLER.get();
-            init(task, ctx, msg, promise, flush);
+        // 获取一个 WriteTask 实例（从对象池）
+        static WriteTask newInstance(AbstractChannelHandlerContext ctx, Object msg, ChannelPromise promise, boolean flush) {
+            WriteTask task = RECYCLER.get();              // 从池中取
+            init(task, ctx, msg, promise, flush);         // 初始化
             return task;
         }
 
-        private static final boolean ESTIMATE_TASK_SIZE_ON_SUBMIT =
-                SystemPropertyUtil.getBoolean("io.netty.transport.estimateSizeOnSubmit", true);
+        // 是否启用提交时估算消息大小（用于流控）
+        private static final boolean ESTIMATE_TASK_SIZE_ON_SUBMIT = SystemPropertyUtil.getBoolean("io.netty.transport.estimateSizeOnSubmit", true);
 
-        // Assuming compressed oops, 12 bytes obj header, 4 ref fields and one int field
-        private static final int WRITE_TASK_OVERHEAD =
-                SystemPropertyUtil.getInt("io.netty.transport.writeTaskSizeOverhead", 32);
+        // 每个 WriteTask 的额外开销（字节数）
+        private static final int WRITE_TASK_OVERHEAD = SystemPropertyUtil.getInt("io.netty.transport.writeTaskSizeOverhead", 32);
 
+        // 对象池 handle，用于回收
         private final Handle<WriteTask> handle;
-        private AbstractChannelHandlerContext ctx;
-        private Object msg;
-        private ChannelPromise promise;
-        private int size; // sign bit controls flush
 
+        // 写操作上下文
+        private AbstractChannelHandlerContext ctx;
+        // 写出的消息
+        private Object msg;
+        // 写操作关联的 promise
+        private ChannelPromise promise;
+        // 估算的大小 + flush 标记（最高位）
+        private int size;
+
+        // 构造函数（私有，只允许池创建）
         private WriteTask(Handle<WriteTask> handle) {
             this.handle = handle;
         }
 
+        // 初始化任务
         static void init(WriteTask task, AbstractChannelHandlerContext ctx,
                          Object msg, ChannelPromise promise, boolean flush) {
             task.ctx = ctx;
             task.msg = msg;
             task.promise = promise;
 
+            // 如果开启了写大小估算
             if (ESTIMATE_TASK_SIZE_ON_SUBMIT) {
+                // 消息估算大小 + 固定开销
                 task.size = ctx.pipeline.estimatorHandle().size(msg) + WRITE_TASK_OVERHEAD;
+                // 累加到 outbound 缓冲统计中
                 ctx.pipeline.incrementPendingOutboundBytes(task.size);
             } else {
                 task.size = 0;
             }
+
+            // 如果 flush 为 true，则将最高位设为 1（负数）
             if (flush) {
                 task.size |= Integer.MIN_VALUE;
             }
         }
 
+        // 实际执行写操作
         @Override
         public void run() {
             try {
-                decrementPendingOutboundBytes();
+                decrementPendingOutboundBytes(); // 释放之前统计的字节数
+                // 调用 ctx.write，flush 标记通过 size < 0 判断
                 ctx.write(msg, size < 0, promise);
             } finally {
-                recycle();
+                recycle(); // 回收任务对象
             }
         }
 
+        // 取消写操作（如 promise 取消）
         void cancel() {
             try {
-                decrementPendingOutboundBytes();
+                decrementPendingOutboundBytes(); // 也要减回字节数
             } finally {
-                recycle();
+                recycle(); // 回收任务对象
             }
         }
 
+        // 减去 pendingOutboundBytes 中的字节数（只取正数部分）
         private void decrementPendingOutboundBytes() {
             if (ESTIMATE_TASK_SIZE_ON_SUBMIT) {
                 ctx.pipeline.decrementPendingOutboundBytes(size & Integer.MAX_VALUE);
             }
         }
 
+        // 回收任务对象到对象池
         private void recycle() {
-            // Set to null so the GC can collect them directly
             ctx = null;
             msg = null;
             promise = null;
@@ -1225,6 +1265,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
 
     /**
      * 存放和管理延迟执行的事件处理任务的结构
+     * 把任务都放在这了 想用就拿
      *
      * @Author: t13max
      * @Since: 8:12 2025/6/30

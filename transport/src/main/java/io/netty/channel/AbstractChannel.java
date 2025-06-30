@@ -300,6 +300,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
      */
     protected abstract class AbstractUnsafe implements Unsafe {
 
+        //出站缓冲区
         private volatile ChannelOutboundBuffer outboundBuffer = new ChannelOutboundBuffer(AbstractChannel.this);
         private RecvByteBufAllocator.Handle recvHandle;
         private boolean inFlush0;
@@ -335,6 +336,8 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             return remoteAddress0();
         }
 
+        //group->loop->channel.unsafe.register
+        //把channel注册进EventLoop
         @Override
         public final void register(EventLoop eventLoop, final ChannelPromise promise) {
             ObjectUtil.checkNotNull(eventLoop, "eventLoop");
@@ -343,23 +346,28 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 return;
             }
             if (!isCompatible(eventLoop)) {
-                promise.setFailure(
-                        new IllegalStateException("incompatible event loop type: " + eventLoop.getClass().getName()));
+                promise.setFailure(new IllegalStateException("incompatible event loop type: " + eventLoop.getClass().getName()));
                 return;
             }
 
+            //赋值
             AbstractChannel.this.eventLoop = eventLoop;
 
             // Clear any cached executors from prior event loop registrations.
+            //清除之前注册时缓存的执行器
+            //每个 ChannelHandlerContext（即 pipeline 中每个 handler）有一个 contextExecutor，表示这个 handler 的执行线程；
+            //当 Channel 重新注册到新的 EventLoop 时，这些缓存的执行器可能已经失效（是旧的线程）；
             AbstractChannelHandlerContext context = pipeline.tail;
             do {
                 context.contextExecutor = null;
                 context = context.prev;
             } while (context != null);
 
+            //在当前EventLoop内 直接调用
             if (eventLoop.inEventLoop()) {
                 register0(promise);
             } else {
+                //不在 提交
                 try {
                     eventLoop.execute(new Runnable() {
                         @Override
@@ -378,9 +386,10 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             }
         }
 
+        //注册
         private void register0(ChannelPromise promise) {
-            // check if the channel is still open as it could be closed in the mean time when the register
-            // call was outside of the eventLoop
+            // check if the channel is still open as it could be closed in the mean time when the register call was outside of the eventLoop
+            //检查通道是否仍处于打开状态，因为当 register 调用在 eventLoop 之外时，它可能同时关闭
             if (!promise.setUncancellable() || !ensureOpen(promise)) {
                 return;
             }
@@ -389,7 +398,9 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             registerPromise.addListener(new ChannelFutureListener() {
                 @Override
                 public void operationComplete(ChannelFuture future) throws Exception {
+                    //成功的回调
                     if (future.isSuccess()) {
+
                         neverRegistered = false;
                         registered = true;
 
@@ -423,14 +434,17 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             doRegister(registerPromise);
         }
 
+        //bootstrap->channel.bind->pipeline->head.bind->unsafe.bind
         @Override
         public final void bind(final SocketAddress localAddress, final ChannelPromise promise) {
+
             assertEventLoop();
 
             if (!promise.setUncancellable() || !ensureOpen(promise)) {
                 return;
             }
 
+            //这个选项是是否绑定具体ip地址(或者127)
             // See: https://github.com/netty/netty/issues/576
             if (Boolean.TRUE.equals(config().getOption(ChannelOption.SO_BROADCAST)) &&
                     localAddress instanceof InetSocketAddress &&
@@ -445,7 +459,9 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             }
 
             boolean wasActive = isActive();
+
             try {
+                //真正执行绑定 具体的channel实现
                 doBind(localAddress);
             } catch (Throwable t) {
                 safeSetFailure(promise, t);
@@ -713,6 +729,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             });
         }
 
+        //注册成功以后 回调里面调用
         @Override
         public final void beginRead() {
             assertEventLoop();
@@ -962,6 +979,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
      * Subclasses may override this method
      *
      * @deprecated use {@link #doRegister(ChannelPromise)}
+     * 这个废弃了 使用下面那个重载
      */
     @Deprecated
     protected void doRegister() throws Exception {
