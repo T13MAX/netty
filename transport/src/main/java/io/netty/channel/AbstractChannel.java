@@ -761,8 +761,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                     // need to fail the future right away. If it is not null the handling of the rest
                     // will be done in flush0()
                     // See https://github.com/netty/netty/issues/2362
-                    safeSetFailure(promise,
-                            newClosedChannelException(initialCloseCause, "write(Object, ChannelPromise)"));
+                    safeSetFailure(promise, newClosedChannelException(initialCloseCause, "write(Object, ChannelPromise)"));
                 }
                 return;
             }
@@ -783,6 +782,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 return;
             }
 
+            //添加消息进缓冲区
             outboundBuffer.addMessage(msg, size, promise);
         }
 

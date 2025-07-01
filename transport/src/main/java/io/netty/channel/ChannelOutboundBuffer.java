@@ -53,20 +53,25 @@ import static java.lang.Math.min;
  * </p>
  * 当你调用 channel.write(msg) 时，数据会被加入到这个缓冲区；
  * channel.flush() 时，会从 outboundBuffer 中取出数据批量写到底层 socket；
+ * 聚合 写入控制
+ * 内部维护了一个写请求的链表：
+ * 这里的操作都在对应的EventLoop里执行 一定线程安全
  */
 public final class ChannelOutboundBuffer {
-    // Assuming a 64-bit JVM:
-    //  - 16 bytes object header
-    //  - 6 reference fields
-    //  - 2 long fields
-    //  - 2 int fields
-    //  - 1 boolean field
-    //  - padding
-    static final int CHANNEL_OUTBOUND_BUFFER_ENTRY_OVERHEAD =
-            SystemPropertyUtil.getInt("io.netty.transport.outboundBufferEntrySizeOverhead", 96);
+
+    //估算64位jvm的每个条目(写请求对象本身 不包含写内容)的内存开销 用于内存估算和流控
+    // 假设是 64-bit JVM 下的对象布局
+    // - 16 字节：对象头（64-bit JVM）
+    // - 6 个引用类型字段（每个 8 字节）
+    // - 2 个 long 字段（每个 8 字节）
+    // - 2 个 int 字段（每个 4 字节）
+    // - 1 个 boolean 字段（1 字节）
+    // - padding（填充）保证对象对齐
+    static final int CHANNEL_OUTBOUND_BUFFER_ENTRY_OVERHEAD = SystemPropertyUtil.getInt("io.netty.transport.outboundBufferEntrySizeOverhead", 96);
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(ChannelOutboundBuffer.class);
 
+    //线程级缓存一个固定大小的 ByteBuffer 数组，供IO操作复用
     private static final FastThreadLocal<ByteBuffer[]> NIO_BUFFERS = new FastThreadLocal<ByteBuffer[]>() {
         @Override
         protected ByteBuffer[] initialValue() throws Exception {
@@ -74,36 +79,49 @@ public final class ChannelOutboundBuffer {
         }
     };
 
+    // 关联的 Channel 对象，表示该写缓冲区所属的通道
     private final Channel channel;
 
     // Entry(flushedEntry) --> ... Entry(unflushedEntry) --> ... Entry(tailEntry)
-    //
-    // The Entry that is the first in the linked-list structure that was flushed
+    // 写缓冲区中的链表结构，分别指向不同状态的写请求条目：
+    // 已经调用 flush 的第一个 Entry（写请求），准备写出到操作系统，但尚未完成写入
     private Entry flushedEntry;
-    // The Entry which is the first unflushed in the linked-list structure
+
+    // 第一个未调用 flush 的 Entry，后续写请求还没被 flush 过
     private Entry unflushedEntry;
-    // The Entry which represents the tail of the buffer
+
+    // 链表尾部 Entry，表示缓冲区中最新加入的写请求
     private Entry tailEntry;
-    // The number of flushed entries that are not written yet
+
+    // 当前已 flush 但尚未完全写入的 Entry 数量
     private int flushed;
 
+    // 通过 gather 写时使用的 ByteBuffer 数组中有效 ByteBuffer 的数量
     private int nioBufferCount;
+
+    // 当前所有待写 ByteBuffer 总大小，统计写缓冲区占用的字节数
     private long nioBufferSize;
 
+    // 标记写缓冲区是否处于写失败状态，避免重复失败处理
     private boolean inFail;
 
+    // 用于原子更新 totalPendingSize 字段，支持多线程安全的流控统计
     private static final AtomicLongFieldUpdater<ChannelOutboundBuffer> TOTAL_PENDING_SIZE_UPDATER =
             AtomicLongFieldUpdater.newUpdater(ChannelOutboundBuffer.class, "totalPendingSize");
 
+    // 当前缓冲区中所有待写数据的总字节数（包括数据本身和条目开销），用于流量控制
     @SuppressWarnings("UnusedDeclaration")
     private volatile long totalPendingSize;
 
+    // 原子更新 unwritable 字段，用于多线程安全管理通道的写可用状态
     private static final AtomicIntegerFieldUpdater<ChannelOutboundBuffer> UNWRITABLE_UPDATER =
             AtomicIntegerFieldUpdater.newUpdater(ChannelOutboundBuffer.class, "unwritable");
 
+    // 标识当前通道是否可写（0 表示可写，非0表示不可写），控制写入流控和通知
     @SuppressWarnings("UnusedDeclaration")
     private volatile int unwritable;
 
+    // 延迟执行的任务，用于异步触发 Channel 可写状态变更事件，通知用户层
     private volatile Runnable fireChannelWritabilityChangedTask;
 
     ChannelOutboundBuffer(AbstractChannel channel) {
@@ -111,11 +129,13 @@ public final class ChannelOutboundBuffer {
     }
 
     /**
-     * Add given message to this {@link ChannelOutboundBuffer}. The given {@link ChannelPromise} will be notified once
-     * the message was written.
+     * Add given message to this {@link ChannelOutboundBuffer}. The given {@link ChannelPromise} will be notified once the message was written.
      */
     public void addMessage(Object msg, int size, ChannelPromise promise) {
+
+        //创建一个Entry
         Entry entry = Entry.newInstance(msg, size, total(msg), promise);
+
         if (tailEntry == null) {
             flushedEntry = null;
         } else {
@@ -128,23 +148,29 @@ public final class ChannelOutboundBuffer {
         }
 
         // Touch the message to make it easier to debug buffer leaks.
+        // 触碰（touch）消息，方便调试内存泄漏（buffer leak） SimpleLeakAwareCompositeByteBuf里面有记录操作
+        //记录当前调用栈（堆栈快照）更新泄漏检测的访问记录（last access record）
 
         // this save both checking against the ReferenceCounted interface
         // and makes better use of virtual calls vs interface ones
+        //避免接口调用带来的性能损耗
         if (msg instanceof AbstractReferenceCountedByteBuf) {
             ((AbstractReferenceCountedByteBuf) msg).touch();
         } else {
+            // 其他情况用通用的 ReferenceCountUtil.touch 进行标记
             ReferenceCountUtil.touch(msg);
         }
 
         // increment pending bytes after adding message to the unflushed arrays.
         // See https://github.com/netty/netty/issues/1619
+        //用来增加当前 ChannelOutboundBuffer 中待写数据的总字节数，用于流量控制和写缓冲管理。
         incrementPendingOutboundBytes(entry.pendingSize, false);
     }
 
     /**
      * Add a flush to this {@link ChannelOutboundBuffer}. This means all previous added messages are marked as flushed
      * and so you will be able to handle them.
+     * 只进行标记 不真的flush 后续的flush0才会真的写 这里只是切引用 标记
      */
     public void addFlush() {
         // There is no need to process all entries if there was already a flush before and no new messages
@@ -159,6 +185,7 @@ public final class ChannelOutboundBuffer {
             }
             do {
                 flushed++;
+                //已取消
                 if (!entry.promise.setUncancellable()) {
                     // Was cancelled so make sure we free up memory and notify about the freed bytes
                     int pending = entry.cancel();
@@ -186,6 +213,7 @@ public final class ChannelOutboundBuffer {
         }
 
         long newWriteBufferSize = TOTAL_PENDING_SIZE_UPDATER.addAndGet(this, size);
+        //超过了最大 设置不可写 用于流控 防止写缓冲区过载
         if (newWriteBufferSize > channel.config().getWriteBufferHighWaterMark()) {
             setUnwritable(invokeLater);
         }
@@ -250,6 +278,7 @@ public final class ChannelOutboundBuffer {
 
     /**
      * Notify the {@link ChannelPromise} of the current message about writing progress.
+     * 更新进度 写了多少
      */
     public void progress(long amount) {
         Entry e = flushedEntry;
@@ -279,9 +308,11 @@ public final class ChannelOutboundBuffer {
     public boolean remove() {
         Entry e = flushedEntry;
         if (e == null) {
+            //清理NIO的缓存
             clearNioBuffers();
             return false;
         }
+
         Object msg = e.msg;
 
         ChannelPromise promise = e.promise;
@@ -289,6 +320,7 @@ public final class ChannelOutboundBuffer {
 
         removeEntry(e);
 
+        // 只在消息未被取消的情况下执行释放、通知、计数等操作
         // only release message, notify and decrement if it was not canceled before.
         if (!e.cancelled) {
             // this save both checking against the ReferenceCounted interface
@@ -307,7 +339,7 @@ public final class ChannelOutboundBuffer {
             decrementPendingOutboundBytes(size, false, true);
         }
 
-        // recycle the entry
+        // recycle the entry 归还对象池
         e.unguardedRecycle();
 
         return true;
@@ -317,6 +349,7 @@ public final class ChannelOutboundBuffer {
      * Will remove the current message, mark its {@link ChannelPromise} as failure using the given {@link Throwable}
      * and return {@code true}. If no   flushed message exists at the time this method is called it will return
      * {@code false} to signal that no more messages are ready to be handled.
+     * 失败的移除
      */
     public boolean remove(Throwable cause) {
         return remove0(cause, true);
