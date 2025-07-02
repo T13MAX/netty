@@ -53,7 +53,7 @@ import static java.lang.Math.min;
  * </p>
  * 当你调用 channel.write(msg) 时，数据会被加入到这个缓冲区；
  * channel.flush() 时，会从 outboundBuffer 中取出数据批量写到底层 socket；
- * 聚合 写入控制
+ * 聚合 写入控制 没有flush的话 每次 write 都立刻暴露出去，无法延迟写、压缩、聚合
  * 内部维护了一个写请求的链表：
  * 这里的操作都在对应的EventLoop里执行 一定线程安全
  */
@@ -398,6 +398,7 @@ public final class ChannelOutboundBuffer {
     /**
      * Removes the fully written entries and update the reader index of the partially written entry.
      * This operation assumes all messages in this buffer is {@link ByteBuf}.
+     * doWrite里调用 写出数据后 移除已经写成功的部分数据
      */
     public void removeBytes(long writtenBytes) {
         for (; ; ) {
@@ -446,6 +447,9 @@ public final class ChannelOutboundBuffer {
      * Note that the returned array is reused and thus should not escape
      * {@link AbstractChannel#doWrite(ChannelOutboundBuffer)}.
      * Refer to {@link NioSocketChannel#doWrite(ChannelOutboundBuffer)} for an example.
+     * 把待写的ByteBuf转成ByteBuffer数组
+     * Netty 使用 Java NIO 的 SocketChannel.write(ByteBuffer[]) 方法批量写数据时 会调用此方法
+     * 避免一次写一个
      * </p>
      */
     public ByteBuffer[] nioBuffers() {
@@ -512,6 +516,7 @@ public final class ChannelOutboundBuffer {
                         if (nioBuf == null) {
                             // cache ByteBuffer as it may need to create a new ByteBuffer instance if its a
                             // derived buffer
+                            //共享底层内存 从ByteBuf转成ByteBuffer
                             entry.buf = nioBuf = buf.internalNioBuffer(readerIndex, readableBytes);
                         }
                         nioBuffers[nioBufferCount++] = nioBuf;
@@ -552,6 +557,7 @@ public final class ChannelOutboundBuffer {
         return nioBufferCount;
     }
 
+    //扩容
     private static ByteBuffer[] expandNioBufferArray(ByteBuffer[] array, int neededSpace, int size) {
         int newCapacity = array.length;
         do {
@@ -712,6 +718,7 @@ public final class ChannelOutboundBuffer {
         return flushed == 0;
     }
 
+    //写出失败或通道关闭的时候调用 处理已经flush但是没写成功的数据
     void failFlushed(Throwable cause, boolean notify) {
         // Make sure that this method does not reenter.  A listener added to the current promise can be notified by the
         // current thread in the tryFailure() call of the loop below, and the listener can trigger another fail() call
@@ -725,6 +732,7 @@ public final class ChannelOutboundBuffer {
         try {
             inFail = true;
             for (; ; ) {
+                //释放其中的消息对象（如 ByteBuf）
                 if (!remove0(cause, notify)) {
                     break;
                 }
@@ -734,6 +742,7 @@ public final class ChannelOutboundBuffer {
         }
     }
 
+    //关闭 把Entry都cannel掉 然后释放内存
     void close(final Throwable cause, final boolean allowChannelOpen) {
         if (inFail) {
             channel.eventLoop().execute(new Runnable() {
@@ -763,10 +772,12 @@ public final class ChannelOutboundBuffer {
                 int size = e.pendingSize;
                 TOTAL_PENDING_SIZE_UPDATER.addAndGet(this, -size);
 
+                //未取消 释放内存
                 if (!e.cancelled) {
                     ReferenceCountUtil.safeRelease(e.msg);
                     safeFail(e.promise, cause);
                 }
+                //回收 并拿到下一个
                 e = e.unguardedRecycleAndGetNext();
             }
         } finally {
@@ -830,6 +841,7 @@ public final class ChannelOutboundBuffer {
      * Call {@link MessageProcessor#processMessage(Object)} for each flushed message
      * in this {@link ChannelOutboundBuffer} until {@link MessageProcessor#processMessage(Object)}
      * returns {@code false} or there are no more flushed messages to process.
+     * 遍历待写出的消息 执行指定Processor
      */
     public void forEachFlushedMessage(MessageProcessor processor) throws Exception {
         ObjectUtil.checkNotNull(processor, "processor");
@@ -853,6 +865,7 @@ public final class ChannelOutboundBuffer {
         return e != null && e != unflushedEntry;
     }
 
+    //消息处理器接口
     public interface MessageProcessor {
         /**
          * Will be called for each flushed message until it either there are no more flushed messages or this
@@ -862,6 +875,8 @@ public final class ChannelOutboundBuffer {
     }
 
     static final class Entry {
+
+        // 使用对象池回收重用 Entry，减少 GC 开销
         private static final ObjectPool<Entry> RECYCLER = ObjectPool.newPool(new ObjectCreator<Entry>() {
             @Override
             public Entry newObject(Handle<Entry> handle) {
@@ -869,16 +884,27 @@ public final class ChannelOutboundBuffer {
             }
         });
 
+        // 当前 Entry 的池化句柄，用于归还对象到池
         private final EnhancedHandle<Entry> handle;
+        // 链表结构中的下一个 Entry（写操作节点）
         Entry next;
+        // 发送的消息对象，通常是 ByteBuf
         Object msg;
+        // 写操作使用的 ByteBuffer 数组（聚合写优化用）
         ByteBuffer[] bufs;
+        // 单个 ByteBuffer（写单条消息时用）
         ByteBuffer buf;
+        // 与该写操作关联的 Promise，用于通知写完成或失败
         ChannelPromise promise;
+        // 当前已写入字节数（用于进度追踪）
         long progress;
+        // 总共需要写出的字节数
         long total;
+        // 该 Entry 的总 pending 字节数（包括 ByteBuf size + overhead）
         int pendingSize;
+        // 如果是 CompositeByteBuf，记录内部 ByteBuf 数量（否则为 -1）
         int count = -1;
+        // 标记该写操作是否已被取消
         boolean cancelled;
 
         private Entry(Handle<Entry> handle) {
@@ -894,6 +920,7 @@ public final class ChannelOutboundBuffer {
             return entry;
         }
 
+        //flush前 会判断是否取消了 取消则释放内存
         int cancel() {
             if (!cancelled) {
                 cancelled = true;
@@ -913,7 +940,9 @@ public final class ChannelOutboundBuffer {
             return 0;
         }
 
+        //归还对象
         void unguardedRecycle() {
+            //设置默认值
             next = null;
             bufs = null;
             buf = null;
@@ -924,9 +953,11 @@ public final class ChannelOutboundBuffer {
             pendingSize = 0;
             count = -1;
             cancelled = false;
+            //归还
             handle.unguardedRecycle(this);
         }
 
+        //归还并拿到下一个
         Entry unguardedRecycleAndGetNext() {
             Entry next = this.next;
             unguardedRecycle();

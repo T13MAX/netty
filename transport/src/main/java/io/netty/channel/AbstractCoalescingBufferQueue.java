@@ -32,7 +32,7 @@ import static io.netty.util.internal.PlatformDependent.throwException;
  * 收集合并多个写入ByteBuf的队列抽象类
  *
  * @Author t13max
- * @Date 15:47 2025/7/1
+ * @Date 10:50 2025/7/2
  */
 @UnstableApi
 public abstract class AbstractCoalescingBufferQueue {
