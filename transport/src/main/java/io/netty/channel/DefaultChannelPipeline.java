@@ -47,21 +47,22 @@ public class DefaultChannelPipeline implements ChannelPipeline {
 
     //日志记录器，用于打印 pipeline 相关日志
     static final InternalLogger logger = InternalLoggerFactory.getInstance(DefaultChannelPipeline.class);
+
     //pipeline 中 head 和 tail 的默认名称
     private static final String HEAD_NAME = generateName0(HeadContext.class);
     private static final String TAIL_NAME = generateName0(TailContext.class);
+
     //缓存每个 ChannelHandler 类生成的名字，加快名称生成，使用 WeakHashMap 避免内存泄漏
-    private static final FastThreadLocal<Map<Class<?>, String>> nameCaches =
-            new FastThreadLocal<Map<Class<?>, String>>() {
+    private static final FastThreadLocal<Map<Class<?>, String>> nameCaches = new FastThreadLocal<Map<Class<?>, String>>() {
                 @Override
                 protected Map<Class<?>, String> initialValue() {
                     return new WeakHashMap<Class<?>, String>();
                 }
             };
+
     //用于原子更新 estimatorHandle 字段的工具类
-    private static final AtomicReferenceFieldUpdater<DefaultChannelPipeline, MessageSizeEstimator.Handle> ESTIMATOR =
-            AtomicReferenceFieldUpdater.newUpdater(
-                    DefaultChannelPipeline.class, MessageSizeEstimator.Handle.class, "estimatorHandle");
+    private static final AtomicReferenceFieldUpdater<DefaultChannelPipeline, MessageSizeEstimator.Handle> ESTIMATOR = AtomicReferenceFieldUpdater.newUpdater(DefaultChannelPipeline.class, MessageSizeEstimator.Handle.class, "estimatorHandle");
+
     //pipeline 的头结点（处理出站事件的起点）
     final HeadContext head;
     //pipeline 的尾结点（处理入站事件的终点）

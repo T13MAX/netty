@@ -33,7 +33,14 @@ import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import static io.netty.util.internal.ObjectUtil.checkNotNull;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
+/**
+ * Promise默认实现
+ *
+ * @Author: t13max
+ * @Since: 8:24 2025/7/4
+ */
 public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
+
     /**
      * System property with integer type value, that determine the max reentrancy/recursion level for when
      * listener notifications prompt other listeners to be notified.
@@ -86,12 +93,10 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
      * <p>
      * It is preferable to use {@link EventExecutor#newPromise()} to create a new promise
      *
-     * @param executor
-     *        the {@link EventExecutor} which is used to notify the promise once it is complete.
-     *        It is assumed this executor will protect against {@link StackOverflowError} exceptions.
-     *        The executor may be used to avoid {@link StackOverflowError} by executing a {@link Runnable} if the stack
-     *        depth exceeds a threshold.
-     *
+     * @param executor the {@link EventExecutor} which is used to notify the promise once it is complete.
+     *                 It is assumed this executor will protect against {@link StackOverflowError} exceptions.
+     *                 The executor may be used to avoid {@link StackOverflowError} by executing a {@link Runnable} if the stack
+     *                 depth exceeds a threshold.
      */
     public DefaultPromise(EventExecutor executor) {
         this.executor = checkNotNull(executor, "executor");
@@ -464,6 +469,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
      * It is assumed this executor will protect against {@link StackOverflowError} exceptions.
      * The executor may be used to avoid {@link StackOverflowError} by executing a {@link Runnable} if the stack
      * depth exceeds a threshold.
+     *
      * @return The executor used to notify listeners when this promise is complete.
      */
     protected EventExecutor executor() {
@@ -482,9 +488,10 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
      * <p>
      * This method has a fixed depth of {@link #MAX_LISTENER_STACK_DEPTH} that will limit recursion to prevent
      * {@link StackOverflowError} and will stop notifying listeners added after this threshold is exceeded.
+     *
      * @param eventExecutor the executor to use to notify the listener {@code listener}.
-     * @param future the future that is complete.
-     * @param listener the listener to notify.
+     * @param future        the future that is complete.
+     * @param listener      the listener to notify.
      */
     protected static void notifyListener(
             EventExecutor eventExecutor, final Future<?> future, final GenericFutureListener<?> listener) {
@@ -565,7 +572,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
                 this.listeners = null;
             }
         }
-        for (;;) {
+        for (; ; ) {
             if (listener != null) {
                 notifyListener0(this, listener);
             } else {
@@ -592,12 +599,12 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
     private void notifyListeners0(DefaultFutureListeners listeners) {
         GenericFutureListener<?>[] a = listeners.listeners();
         int size = listeners.size();
-        for (int i = 0; i < size; i ++) {
+        for (int i = 0; i < size; i++) {
             notifyListener0(this, a[i]);
         }
     }
 
-    @SuppressWarnings({ "unchecked", "rawtypes" })
+    @SuppressWarnings({"unchecked", "rawtypes"})
     private static void notifyListener0(Future future, GenericFutureListener l) {
         try {
             l.operationComplete(future);
@@ -644,7 +651,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
 
     private boolean setValue0(Object objResult) {
         if (RESULT_UPDATER.compareAndSet(this, null, objResult) ||
-            RESULT_UPDATER.compareAndSet(this, UNCANCELLABLE, objResult)) {
+                RESULT_UPDATER.compareAndSet(this, UNCANCELLABLE, objResult)) {
             if (checkNotifyWaiters()) {
                 notifyListeners();
             }
@@ -655,6 +662,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
 
     /**
      * Check if there are any waiters and if so notify these.
+     *
      * @return {@code true} if there are any listeners attached to the promise, {@code false} otherwise.
      */
     private synchronized boolean checkNotifyWaiters() {
@@ -746,8 +754,9 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
      * the original invocation completes.
      * <p>
      * This will do an iteration over all listeners to get all of type {@link GenericProgressiveFutureListener}s.
+     *
      * @param progress the new progress.
-     * @param total the total progress.
+     * @param total    the total progress.
      */
     @SuppressWarnings("unchecked")
     void notifyProgressiveListeners(final long progress, final long total) {
@@ -810,7 +819,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
                 case 0:
                     return null;
                 case 1:
-                    for (GenericFutureListener<?> l: dfl.listeners()) {
+                    for (GenericFutureListener<?> l : dfl.listeners()) {
                         if (l instanceof GenericProgressiveFutureListener) {
                             return l;
                         }
@@ -820,10 +829,10 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
 
             GenericFutureListener<?>[] array = dfl.listeners();
             GenericProgressiveFutureListener<?>[] copy = new GenericProgressiveFutureListener[progressiveSize];
-            for (int i = 0, j = 0; j < progressiveSize; i ++) {
+            for (int i = 0, j = 0; j < progressiveSize; i++) {
                 GenericFutureListener<?> l = array[i];
                 if (l instanceof GenericProgressiveFutureListener) {
-                    copy[j ++] = (GenericProgressiveFutureListener<?>) l;
+                    copy[j++] = (GenericProgressiveFutureListener<?>) l;
                 }
             }
 
@@ -838,7 +847,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
 
     private static void notifyProgressiveListeners0(
             ProgressiveFuture<?> future, GenericProgressiveFutureListener<?>[] listeners, long progress, long total) {
-        for (GenericProgressiveFutureListener<?> l: listeners) {
+        for (GenericProgressiveFutureListener<?> l : listeners) {
             if (l == null) {
                 break;
             }
@@ -846,7 +855,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
         }
     }
 
-    @SuppressWarnings({ "unchecked", "rawtypes" })
+    @SuppressWarnings({"unchecked", "rawtypes"})
     private static void notifyProgressiveListener0(
             ProgressiveFuture future, GenericProgressiveFutureListener l, long progress, long total) {
         try {
@@ -868,6 +877,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
 
     private static final class CauseHolder {
         final Throwable cause;
+
         CauseHolder(Throwable cause) {
             this.cause = cause;
         }
@@ -885,7 +895,8 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
 
         private static final long serialVersionUID = -2974906711413716191L;
 
-        private StacklessCancellationException() { }
+        private StacklessCancellationException() {
+        }
 
         // Override fillInStackTrace() so we not populate the backtrace via a native call and so leak the
         // Classloader.

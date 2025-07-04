@@ -30,6 +30,7 @@ import static io.netty.util.internal.ObjectUtil.checkNotNull;
 public class DefaultChannelPromise extends DefaultPromise<Void> implements ChannelPromise, FlushCheckpoint {
 
     private final Channel channel;
+
     private long checkpoint;
 
     /**
