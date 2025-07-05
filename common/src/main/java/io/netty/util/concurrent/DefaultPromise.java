@@ -50,23 +50,30 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
      * <p>
      * The default value is {@code 8}.
      */
+    // 监听器最大嵌套深度，防止 StackOverflow
     public static final String PROPERTY_MAX_LISTENER_STACK_DEPTH = "io.netty.defaultPromise.maxListenerStackDepth";
 
+    // 日志记录器
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(DefaultPromise.class);
-    private static final InternalLogger rejectedExecutionLogger =
-            InternalLoggerFactory.getInstance(DefaultPromise.class.getName() + ".rejectedExecution");
-    private static final int MAX_LISTENER_STACK_DEPTH = Math.min(8,
-            SystemPropertyUtil.getInt(PROPERTY_MAX_LISTENER_STACK_DEPTH, 8));
+    // 当执行监听器任务被拒绝时使用的日志记录器
+    private static final InternalLogger rejectedExecutionLogger = InternalLoggerFactory.getInstance(DefaultPromise.class.getName() + ".rejectedExecution");
+    // 监听器最大调用栈深度（默认 8），超过后会提交到 EventLoop 执行，避免递归死循环
+    private static final int MAX_LISTENER_STACK_DEPTH = Math.min(8, SystemPropertyUtil.getInt(PROPERTY_MAX_LISTENER_STACK_DEPTH, 8));
+    // 原子更新 result 字段 用于多线程下设置 Promise 的完成结果 防御性编程 取消和完成竞争 超时和完成竞争 用户逻辑错误
     @SuppressWarnings("rawtypes")
-    private static final AtomicReferenceFieldUpdater<DefaultPromise, Object> RESULT_UPDATER =
-            AtomicReferenceFieldUpdater.newUpdater(DefaultPromise.class, Object.class, "result");
+    private static final AtomicReferenceFieldUpdater<DefaultPromise, Object> RESULT_UPDATER = AtomicReferenceFieldUpdater.newUpdater(DefaultPromise.class, Object.class, "result");
+    // 表示成功的常量对象
     private static final Object SUCCESS = new Object();
+    // 表示不可取消的常量对象
     private static final Object UNCANCELLABLE = new Object();
-    private static final CauseHolder CANCELLATION_CAUSE_HOLDER = new CauseHolder(
-            StacklessCancellationException.newInstance(DefaultPromise.class, "cancel(...)"));
+    // 表示被取消的结果包装，包含异常信息
+    private static final CauseHolder CANCELLATION_CAUSE_HOLDER = new CauseHolder(StacklessCancellationException.newInstance(DefaultPromise.class, "cancel(...)"));
+    // 取消时使用的预定义栈信息，减少内存分配
     private static final StackTraceElement[] CANCELLATION_STACK = CANCELLATION_CAUSE_HOLDER.cause.getStackTrace();
 
+    //结果
     private volatile Object result;
+    //执行回调的线程
     private final EventExecutor executor;
 
     /**
@@ -79,12 +86,14 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
     private DefaultFutureListeners listeners;
     /**
      * Threading - synchronized(this). We are required to hold the monitor to use Java's underlying wait()/notifyAll().
+     * /等待在该 Promise 上阻塞等待结果的线程数量
      */
     private short waiters;
 
     /**
      * Threading - synchronized(this). We must prevent concurrent notification and FIFO listener notification if the
      * executor changes.
+     * 标记当前是否正在通知监听器，防止重复或并发通知
      */
     private boolean notifyingListeners;
 
@@ -138,10 +147,12 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
 
     @Override
     public boolean setUncancellable() {
+        //把不可取消设置在result上
         if (RESULT_UPDATER.compareAndSet(this, null, UNCANCELLABLE)) {
             return true;
         }
         Object result = this.result;
+        //没完成 没取消
         return !isDone0(result) || !isCancelled0(result);
     }
 
