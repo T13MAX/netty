@@ -27,6 +27,7 @@ import java.util.Map;
 public abstract class ChannelHandlerAdapter implements ChannelHandler {
 
     // Not using volatile because it's used only for a sanity check.
+    //标记这个Handler是否已经被添加
     boolean added;
 
     /**
@@ -80,7 +81,7 @@ public abstract class ChannelHandlerAdapter implements ChannelHandler {
     /**
      * Calls {@link ChannelHandlerContext#fireExceptionCaught(Throwable)} to forward
      * to the next {@link ChannelHandler} in the {@link ChannelPipeline}.
-     *
+     * <p>
      * Sub-classes may override this method to change behavior.
      *
      * @deprecated is part of {@link ChannelInboundHandler}

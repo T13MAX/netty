@@ -17,6 +17,12 @@ package io.netty.channel;
 
 import io.netty.util.concurrent.EventExecutor;
 
+/**
+ * 默认实现
+ *     
+ * @Author t13max
+ * @Date 10:44 2025/7/3
+ */
 final class DefaultChannelHandlerContext extends AbstractChannelHandlerContext {
 
     private final ChannelHandler handler;

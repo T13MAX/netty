@@ -32,7 +32,7 @@ import static io.netty.util.internal.ObjectUtil.checkNotNull;
  */
 public class DefaultChannelPromise extends DefaultPromise<Void> implements ChannelPromise, FlushCheckpoint {
 
-    //当前Promise所属的Channel
+    //当前Promise所绑定的channel
     private final Channel channel;
 
     //记录任务进度

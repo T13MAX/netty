@@ -81,9 +81,12 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
      * If {@code null}, it means either 1) no listeners were added yet or 2) all listeners were notified.
      * <p>
      * Threading - synchronized(this). We must support adding listeners when there is no EventExecutor.
+     * 单个监听器，用于优化只注册一个监听器的情况
      */
     private GenericFutureListener<? extends Future<?>> listener;
+    //多个监听器，用于注册多个监听器时使用
     private DefaultFutureListeners listeners;
+
     /**
      * Threading - synchronized(this). We are required to hold the monitor to use Java's underlying wait()/notifyAll().
      * /等待在该 Promise 上阻塞等待结果的线程数量
@@ -147,7 +150,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
 
     @Override
     public boolean setUncancellable() {
-        //把不可取消设置在result上
+        //把不可取消设置在result上 真正的结果来了会cas设置结果
         if (RESULT_UPDATER.compareAndSet(this, null, UNCANCELLABLE)) {
             return true;
         }
@@ -164,13 +167,17 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
 
     @Override
     public boolean isCancellable() {
+        //为空默认可取消 因为不可取消的时候会把UNCANCELLABLE设置在result上 如果真正的结果来了和=或异常了 那就是完事了 也不可取消
         return result == null;
     }
 
+    //轻量级 任务被取消了异常
     private static final class LeanCancellationException extends CancellationException {
+
         private static final long serialVersionUID = 2794674970981187807L;
 
         // Suppress a warning since the method doesn't need synchronization
+        //重写 直接设置静态的栈信息 避免频繁构建栈信息
         @Override
         public Throwable fillInStackTrace() {
             setStackTrace(CANCELLATION_STACK);
@@ -185,13 +192,16 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
 
     @Override
     public Throwable cause() {
+        //返回异常
         return cause0(result);
     }
 
     private Throwable cause0(Object result) {
+        //判断类型是否正确
         if (!(result instanceof CauseHolder)) {
             return null;
         }
+        //取消异常 用精简版包裹返回
         if (result == CANCELLATION_CAUSE_HOLDER) {
             CancellationException ce = new LeanCancellationException();
             if (RESULT_UPDATER.compareAndSet(this, CANCELLATION_CAUSE_HOLDER, new CauseHolder(ce))) {
@@ -199,6 +209,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
             }
             result = this.result;
         }
+        //返回原始异常
         return ((CauseHolder) result).cause;
     }
 
@@ -219,21 +230,23 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
 
     @Override
     public Promise<V> addListeners(GenericFutureListener<? extends Future<? super V>>... listeners) {
+        //判空
         checkNotNull(listeners, "listeners");
-
+        //锁住
         synchronized (this) {
             for (GenericFutureListener<? extends Future<? super V>> listener : listeners) {
                 if (listener == null) {
                     break;
                 }
+                //添加
                 addListener0(listener);
             }
         }
-
+        //是否完成
         if (isDone()) {
+            //通知
             notifyListeners();
         }
-
         return this;
     }
 
@@ -266,22 +279,28 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
 
     @Override
     public Promise<V> await() throws InterruptedException {
+        //任务已完成直接返回
         if (isDone()) {
             return this;
         }
-
+        //如果线程已被中断 抛出中断异常
         if (Thread.interrupted()) {
             throw new InterruptedException(toString());
         }
 
+        //检测死锁 比如在EventLoop里阻塞
         checkDeadLock();
 
+        //wait() 和 notifyAll() 是 Java 对象的监视器方法，必须在持有该对象的锁时才能调用
         synchronized (this) {
             while (!isDone()) {
+                //递增等待者
                 incWaiters();
                 try {
+                    //等待 使用 wait/notify 已经够用 不需要ReentrantLock那一套
                     wait();
                 } finally {
+                    //递减
                     decWaiters();
                 }
             }
@@ -289,14 +308,17 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
         return this;
     }
 
+    //不可中断等待
     @Override
     public Promise<V> awaitUninterruptibly() {
+        // 如果已经完成，直接返回
         if (isDone()) {
             return this;
         }
 
+        // 检查是否存在死锁（例如在 EventLoop 线程中调用阻塞方法）
         checkDeadLock();
-
+        // 记录是否被中断过
         boolean interrupted = false;
         synchronized (this) {
             while (!isDone()) {
@@ -304,7 +326,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
                 try {
                     wait();
                 } catch (InterruptedException e) {
-                    // Interrupted while waiting.
+                    //吞掉异常 不能中断
                     interrupted = true;
                 } finally {
                     decWaiters();
@@ -312,6 +334,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
             }
         }
 
+        // 恢复中断状态，让上层知道线程曾被中断过
         if (interrupted) {
             Thread.currentThread().interrupt();
         }
@@ -335,6 +358,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
             return await0(unit.toNanos(timeout), false);
         } catch (InterruptedException e) {
             // Should not be raised at all.
+            // 如果走到这 那就是有bug 是个不该发生的错误
             throw new InternalError();
         }
     }
@@ -411,7 +435,9 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
     @Override
     public boolean cancel(boolean mayInterruptIfRunning) {
         if (RESULT_UPDATER.compareAndSet(this, null, CANCELLATION_CAUSE_HOLDER)) {
+            //有线程在等待 则唤醒
             if (checkNotifyWaiters()) {
+                //通知listener promise的状态变化
                 notifyListeners();
             }
             return true;
@@ -482,13 +508,16 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
      * depth exceeds a threshold.
      *
      * @return The executor used to notify listeners when this promise is complete.
+     * 获取用于在此 promise 完成时通知侦听器的 executor
      */
     protected EventExecutor executor() {
         return executor;
     }
 
+    //检测死锁
     protected void checkDeadLock() {
         EventExecutor e = executor();
+        //在EventLoop里阻塞
         if (e != null && e.inEventLoop()) {
             throw new BlockingOperationException(toString());
         }
@@ -504,14 +533,11 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
      * @param future        the future that is complete.
      * @param listener      the listener to notify.
      */
-    protected static void notifyListener(
-            EventExecutor eventExecutor, final Future<?> future, final GenericFutureListener<?> listener) {
-        notifyListenerWithStackOverFlowProtection(
-                checkNotNull(eventExecutor, "eventExecutor"),
-                checkNotNull(future, "future"),
-                checkNotNull(listener, "listener"));
+    protected static void notifyListener(EventExecutor eventExecutor, final Future<?> future, final GenericFutureListener<?> listener) {
+        notifyListenerWithStackOverFlowProtection(checkNotNull(eventExecutor, "eventExecutor"), checkNotNull(future, "future"), checkNotNull(listener, "listener"));
     }
 
+    //添加listener cancel setValue 都会调用
     private void notifyListeners() {
         EventExecutor executor = executor();
         if (executor.inEventLoop()) {
@@ -541,9 +567,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
      * cannot share code because the listener(s) cannot be cached for an instance of {@link DefaultPromise} since the
      * listener(s) may be changed and is protected by a synchronized operation.
      */
-    private static void notifyListenerWithStackOverFlowProtection(final EventExecutor executor,
-                                                                  final Future<?> future,
-                                                                  final GenericFutureListener<?> listener) {
+    private static void notifyListenerWithStackOverFlowProtection(final EventExecutor executor, final Future<?> future, final GenericFutureListener<?> listener) {
         if (executor.inEventLoop()) {
             final InternalThreadLocalMap threadLocals = InternalThreadLocalMap.get();
             final int stackDepth = threadLocals.futureListenerStackDepth();
@@ -706,52 +730,69 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
         PlatformDependent.throwException(cause);
     }
 
+    // 等待 Promise 完成，支持是否响应中断 + 超时时间控制
     private boolean await0(long timeoutNanos, boolean interruptable) throws InterruptedException {
+        // 如果已完成，直接返回
         if (isDone()) {
             return true;
         }
 
+        // 如果传入的超时时间为 0 或负数，直接检查 isDone 并返回
         if (timeoutNanos <= 0) {
             return isDone();
         }
 
+        // 如果允许中断且当前线程已中断，抛出 InterruptedException
         if (interruptable && Thread.interrupted()) {
             throw new InterruptedException(toString());
         }
 
+        // 检查是否可能死锁
         checkDeadLock();
 
-        // Start counting time from here instead of the first line of this method,
-        // to avoid/postpone performance cost of System.nanoTime().
+        // 记录开始等待的时间（用于后续计算剩余时间）
         final long startTime = System.nanoTime();
+
+        // 同步块保护 wait/notify 机制
         synchronized (this) {
             boolean interrupted = false;
             try {
                 long waitTime = timeoutNanos;
+
+                // 如果未完成，且剩余等待时间大于 0，则继续等待
                 while (!isDone() && waitTime > 0) {
+                    // 增加等待线程计数
                     incWaiters();
                     try {
+                        // 等待指定时间（毫秒和纳秒）
                         wait(waitTime / 1000000, (int) (waitTime % 1000000));
                     } catch (InterruptedException e) {
                         if (interruptable) {
+                            // 如果允许中断则抛出异常
                             throw e;
                         } else {
+                            // 不允许中断则记录被中断标记，等函数退出后重置中断状态
                             interrupted = true;
                         }
                     } finally {
+                        // 减少等待线程计数
                         decWaiters();
                     }
-                    // Check isDone() in advance, try to avoid calculating the elapsed time later.
+
+                    // 如果已完成则立即返回
                     if (isDone()) {
                         return true;
                     }
-                    // Calculate the elapsed time here instead of in the while condition,
-                    // try to avoid performance cost of System.nanoTime() in the first loop of while.
+
+                    // 重新计算剩余等待时间
                     waitTime = timeoutNanos - (System.nanoTime() - startTime);
                 }
+
+                // 超时或完成后最终返回结果状态
                 return isDone();
             } finally {
                 if (interrupted) {
+                    // 如果期间中断但未抛出异常，则恢复中断标志位
                     Thread.currentThread().interrupt();
                 }
             }
@@ -765,12 +806,16 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
      * the original invocation completes.
      * <p>
      * This will do an iteration over all listeners to get all of type {@link GenericProgressiveFutureListener}s.
+     * DefaultProgressivePromise使用的方法
+     * 通知所有进度监听器（GenericProgressiveFutureListener），传入当前进度和总大小。
      *
      * @param progress the new progress.
      * @param total    the total progress.
      */
     @SuppressWarnings("unchecked")
     void notifyProgressiveListeners(final long progress, final long total) {
+
+        // 获取当前注册的进度监听器，可能是单个、多个或 null
         final Object listeners = progressiveListeners();
         if (listeners == null) {
             return;
@@ -780,17 +825,16 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
 
         EventExecutor executor = executor();
         if (executor.inEventLoop()) {
+            // 当前线程在 EventLoop 中，直接执行监听器
             if (listeners instanceof GenericProgressiveFutureListener[]) {
-                notifyProgressiveListeners0(
-                        self, (GenericProgressiveFutureListener<?>[]) listeners, progress, total);
+                notifyProgressiveListeners0(self, (GenericProgressiveFutureListener<?>[]) listeners, progress, total);
             } else {
-                notifyProgressiveListener0(
-                        self, (GenericProgressiveFutureListener<ProgressiveFuture<V>>) listeners, progress, total);
+                notifyProgressiveListener0(self, (GenericProgressiveFutureListener<ProgressiveFuture<V>>) listeners, progress, total);
             }
         } else {
+            // 当前线程不是 EventLoop，异步提交到对应的线程执行
             if (listeners instanceof GenericProgressiveFutureListener[]) {
-                final GenericProgressiveFutureListener<?>[] array =
-                        (GenericProgressiveFutureListener<?>[]) listeners;
+                final GenericProgressiveFutureListener<?>[] array = (GenericProgressiveFutureListener<?>[]) listeners;
                 safeExecute(executor, new Runnable() {
                     @Override
                     public void run() {
@@ -798,8 +842,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
                     }
                 });
             } else {
-                final GenericProgressiveFutureListener<ProgressiveFuture<V>> l =
-                        (GenericProgressiveFutureListener<ProgressiveFuture<V>>) listeners;
+                final GenericProgressiveFutureListener<ProgressiveFuture<V>> l = (GenericProgressiveFutureListener<ProgressiveFuture<V>>) listeners;
                 safeExecute(executor, new Runnable() {
                     @Override
                     public void run() {
@@ -812,24 +855,26 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
 
     /**
      * Returns a {@link GenericProgressiveFutureListener}, an array of {@link GenericProgressiveFutureListener}, or
+     * 返回当前注册的进度监听器
      * {@code null}.
      */
     private synchronized Object progressiveListeners() {
         final GenericFutureListener listener = this.listener;
         final DefaultFutureListeners listeners = this.listeners;
+
         if (listener == null && listeners == null) {
-            // No listeners added
             return null;
         }
 
         if (listeners != null) {
-            // Copy DefaultFutureListeners into an array of listeners.
+            // 多个监听器，筛选出进度监听器
             DefaultFutureListeners dfl = listeners;
             int progressiveSize = dfl.progressiveSize();
             switch (progressiveSize) {
                 case 0:
                     return null;
                 case 1:
+                    // 只有一个，直接返回
                     for (GenericFutureListener<?> l : dfl.listeners()) {
                         if (l instanceof GenericProgressiveFutureListener) {
                             return l;
@@ -838,6 +883,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
                     return null;
             }
 
+            // 多个监听器，复制所有进度监听器到一个新数组中
             GenericFutureListener<?>[] array = dfl.listeners();
             GenericProgressiveFutureListener<?>[] copy = new GenericProgressiveFutureListener[progressiveSize];
             for (int i = 0, j = 0; j < progressiveSize; i++) {
@@ -846,18 +892,18 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
                     copy[j++] = (GenericProgressiveFutureListener<?>) l;
                 }
             }
-
             return copy;
+
         } else if (listener instanceof GenericProgressiveFutureListener) {
+            // 单个监听器是进度监听器，直接返回
             return listener;
         } else {
-            // Only one listener was added and it's not a progressive listener.
+            // 单个监听器但不是进度监听器
             return null;
         }
     }
 
-    private static void notifyProgressiveListeners0(
-            ProgressiveFuture<?> future, GenericProgressiveFutureListener<?>[] listeners, long progress, long total) {
+    private static void notifyProgressiveListeners0(ProgressiveFuture<?> future, GenericProgressiveFutureListener<?>[] listeners, long progress, long total) {
         for (GenericProgressiveFutureListener<?> l : listeners) {
             if (l == null) {
                 break;
@@ -867,8 +913,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private static void notifyProgressiveListener0(
-            ProgressiveFuture future, GenericProgressiveFutureListener l, long progress, long total) {
+    private static void notifyProgressiveListener0(ProgressiveFuture future, GenericProgressiveFutureListener l, long progress, long total) {
         try {
             l.operationProgressed(future, progress, total);
         } catch (Throwable t) {
@@ -886,7 +931,9 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
         return result != null && result != UNCANCELLABLE;
     }
 
+    //异常包装
     private static final class CauseHolder {
+
         final Throwable cause;
 
         CauseHolder(Throwable cause) {
@@ -913,6 +960,7 @@ public class DefaultPromise<V> extends AbstractFuture<V> implements Promise<V> {
         // Classloader.
         @Override
         public Throwable fillInStackTrace() {
+            //这样就不生成任何堆栈信息
             return this;
         }
 
