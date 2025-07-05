@@ -20,10 +20,12 @@ import io.netty.util.concurrent.AbstractEventExecutor;
 
 /**
  * Skeletal implementation of {@link EventLoop}.
+ * EventLoop的骨架实现
  */
 public abstract class AbstractEventLoop extends AbstractEventExecutor implements EventLoop {
 
-    protected AbstractEventLoop() { }
+    protected AbstractEventLoop() {
+    }
 
     protected AbstractEventLoop(EventLoopGroup parent) {
         super(parent);

@@ -19,6 +19,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * A nanosecond-based time source, e.g. {@link System#nanoTime()}.
+ * 抽象时间源 默认使用System.nanoTime() 可以替换为自定义实现
  */
 public interface Ticker {
     /**
@@ -41,6 +42,7 @@ public interface Ticker {
 
     /**
      * The initial value used for delay and computations based upon a monotonic time source.
+     *
      * @return initial value used for delay and computations based upon a monotonic time source.
      */
     long initialNanoTime();
@@ -55,8 +57,7 @@ public interface Ticker {
      * Waits until the given amount of time goes by.
      *
      * @param delay the amount of delay.
-     * @param unit the {@link TimeUnit} of {@code delay}.
-     *
+     * @param unit  the {@link TimeUnit} of {@code delay}.
      * @see Thread#sleep(long)
      */
     void sleep(long delay, TimeUnit unit) throws InterruptedException;
@@ -65,7 +66,6 @@ public interface Ticker {
      * Waits until the given amount of time goes by.
      *
      * @param delayMillis the number of milliseconds.
-     *
      * @see Thread#sleep(long)
      */
     default void sleepMillis(long delayMillis) throws InterruptedException {

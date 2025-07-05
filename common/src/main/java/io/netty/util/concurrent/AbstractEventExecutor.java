@@ -32,14 +32,18 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Abstract base class for {@link EventExecutor} implementations.
+ * EventExecutor抽象基类
  */
 public abstract class AbstractEventExecutor extends AbstractExecutorService implements EventExecutor {
+
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(AbstractEventExecutor.class);
 
     static final long DEFAULT_SHUTDOWN_QUIET_PERIOD = 2;
     static final long DEFAULT_SHUTDOWN_TIMEOUT = 15;
 
+    // 当前 EventExecutor 所属的 EventExecutorGroup，用于实现 parent() 方法。
     private final EventExecutorGroup parent;
+    //把自己包装成一个list 用于Iterable 接口中 iterator() 方法
     private final Collection<EventExecutor> selfCollection = Collections.<EventExecutor>singleton(this);
 
     protected AbstractEventExecutor() {
@@ -113,8 +117,7 @@ public abstract class AbstractEventExecutor extends AbstractExecutorService impl
     }
 
     @Override
-    public ScheduledFuture<?> schedule(Runnable command, long delay,
-                                       TimeUnit unit) {
+    public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
         throw new UnsupportedOperationException();
     }
 
@@ -153,6 +156,7 @@ public abstract class AbstractEventExecutor extends AbstractExecutorService impl
      * a non-lazy task is executed or the executor is shut down.
      * <p>
      * The default implementation just delegates to {@link #execute(Runnable)}.
+     * 标注为 UnstableApi，表示该方法是实验性
      * </p>
      */
     @UnstableApi
@@ -161,9 +165,9 @@ public abstract class AbstractEventExecutor extends AbstractExecutorService impl
     }
 
     /**
-     *  @deprecated override {@link SingleThreadEventExecutor#wakesUpForTask} to re-create this behaviour
-     *
+     * @deprecated override {@link SingleThreadEventExecutor#wakesUpForTask} to re-create this behaviour
      */
     @Deprecated
-    public interface LazyRunnable extends Runnable { }
+    public interface LazyRunnable extends Runnable {
+    }
 }

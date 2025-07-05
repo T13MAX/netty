@@ -23,14 +23,17 @@ import java.util.concurrent.TimeUnit;
  * with some handy methods to see if a {@link Thread} is executed in a event loop.
  * Besides this, it also extends the {@link EventExecutorGroup} to allow for a generic
  * way to access methods.
+ * 把EventExecutor当做EventExecutorGroup来用
  */
 public interface EventExecutor extends EventExecutorGroup, ThreadAwareExecutor {
 
     /**
      * Return the {@link EventExecutorGroup} which is the parent of this {@link EventExecutor},
+     * 返回当前 EventExecutor 所属的 EventExecutorGroup。
      */
     EventExecutorGroup parent();
 
+    //判断给定线程是否为当前 EventExecutor 所在线程（等价于 inEventLoop(thread)）。
     @Override
     default boolean isExecutorThread(Thread thread) {
         return inEventLoop(thread);
@@ -38,6 +41,7 @@ public interface EventExecutor extends EventExecutorGroup, ThreadAwareExecutor {
 
     /**
      * Calls {@link #inEventLoop(Thread)} with {@link Thread#currentThread()} as argument
+     * 判断指定线程是否为当前 EventExecutor 的执行线程
      */
     default boolean inEventLoop() {
         return inEventLoop(Thread.currentThread());
@@ -45,12 +49,14 @@ public interface EventExecutor extends EventExecutorGroup, ThreadAwareExecutor {
 
     /**
      * Return {@code true} if the given {@link Thread} is executed in the event loop,
+     * 判断指定线程是否为当前 EventExecutor 的执行线程
      * {@code false} otherwise.
      */
     boolean inEventLoop(Thread thread);
 
     /**
      * Return a new {@link Promise}.
+     * 创建一个新的 Promise 绑定到当前 EventExecutor 上。
      */
     default <V> Promise<V> newPromise() {
         return new DefaultPromise<>(this);
@@ -58,6 +64,7 @@ public interface EventExecutor extends EventExecutorGroup, ThreadAwareExecutor {
 
     /**
      * Create a new {@link ProgressivePromise}.
+     * 创建一个新的 ProgressivePromise 用于支持进度通知的异步任务
      */
     default <V> ProgressivePromise<V> newProgressivePromise() {
         return new DefaultProgressivePromise<>(this);
@@ -67,6 +74,8 @@ public interface EventExecutor extends EventExecutorGroup, ThreadAwareExecutor {
      * Create a new {@link Future} which is marked as succeeded already. So {@link Future#isSuccess()}
      * will return {@code true}. All {@link FutureListener} added to it will be notified directly. Also
      * every call of blocking methods will just return without blocking.
+     * 创建一个已经成功完成的 Future
+     * isSuccess() 返回 true 监听器会立刻被通知 阻塞方法不会阻塞
      */
     default <V> Future<V> newSucceededFuture(V result) {
         return new SucceededFuture<>(this, result);
@@ -76,6 +85,8 @@ public interface EventExecutor extends EventExecutorGroup, ThreadAwareExecutor {
      * Create a new {@link Future} which is marked as failed already. So {@link Future#isSuccess()}
      * will return {@code false}. All {@link FutureListener} added to it will be notified directly. Also
      * every call of blocking methods will just return without blocking.
+     * 创建一个已经失败完成的 Future
+     * isSuccess() 返回 false 监听器会立刻被通知 阻塞方法不会阻塞
      */
     default <V> Future<V> newFailedFuture(Throwable cause) {
         return new FailedFuture<>(this, cause);
@@ -83,6 +94,7 @@ public interface EventExecutor extends EventExecutorGroup, ThreadAwareExecutor {
 
     /**
      * Returns {@code true} if the {@link EventExecutor} is considered suspended.
+     * 判断当前 EventExecutor 是否被挂起(暂停调度)
      *
      * @return {@code true} if suspended, {@code false} otherwise.
      */
@@ -102,9 +114,12 @@ public interface EventExecutor extends EventExecutorGroup, ThreadAwareExecutor {
      *   <li>{@link #scheduleAtFixedRate(Runnable, long, long, TimeUnit)}</li>
      *   <li>{@link #scheduleWithFixedDelay(Runnable, long, long, TimeUnit)}</li>
      * </ul>
-     *
+     * <p>
      * Even if this method returns {@code true} it might take some time for the {@link EventExecutor} to fully suspend
      * itself.
+     * 尝试挂起当前 EventExecutor (释放线程等资源)
+     * 如果调用成功 在重新提交任务时会恢复运行
+     * 即使返回 true 真正挂起也可能有延迟
      *
      * @return {@code true} if suspension was successful, otherwise {@code false}.
      */
