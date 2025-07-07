@@ -36,6 +36,7 @@ public abstract class SingleThreadEventLoop extends SingleThreadEventExecutor im
 
     protected static final int DEFAULT_MAX_PENDING_TASKS = Math.max(16, SystemPropertyUtil.getInt("io.netty.eventLoop.maxPendingTasks", Integer.MAX_VALUE));
 
+    //尾部任务队列
     private final Queue<Runnable> tailTasks;
 
     protected SingleThreadEventLoop(EventLoopGroup parent, ThreadFactory threadFactory, boolean addTaskWakesUp) {
@@ -114,6 +115,8 @@ public abstract class SingleThreadEventLoop extends SingleThreadEventExecutor im
 
     /**
      * Adds a task to be run once at the end of next (or current) {@code eventloop} iteration.
+     * 在当前 EventLoop 的一次事件循环结束后再执行指定任务
+     * 用于一些需要 延迟到当前事件循环尾部再处理的任务
      *
      * @param task to be added.
      */
@@ -128,12 +131,14 @@ public abstract class SingleThreadEventLoop extends SingleThreadEventExecutor im
         }
 
         if (wakesUpForTask(task)) {
+            //唤醒 提交一个唤醒任务
             wakeup(inEventLoop());
         }
     }
 
     /**
      * Removes a task that was added previously via {@link #executeAfterEventLoopIteration(Runnable)}.
+     * 移除一个尾部处理的任务
      *
      * @param task to be removed.
      * @return {@code true} if the task was removed as a result of this call.
@@ -142,18 +147,22 @@ public abstract class SingleThreadEventLoop extends SingleThreadEventExecutor im
         return tailTasks.remove(ObjectUtil.checkNotNull(task, "task"));
     }
 
+    //执行所有任务
     @Override
     protected void afterRunningAllTasks() {
         runAllTasksFrom(tailTasks);
     }
 
+    //是否存在任务
     @Override
     protected boolean hasTasks() {
         return super.hasTasks() || !tailTasks.isEmpty();
     }
 
+    //返回待执行任务数量
     @Override
     public int pendingTasks() {
+        //主任务队列和待执行任务队列数量和
         return super.pendingTasks() + tailTasks.size();
     }
 
@@ -161,6 +170,7 @@ public abstract class SingleThreadEventLoop extends SingleThreadEventExecutor im
      * Returns the number of {@link Channel}s registered with this {@link EventLoop} or {@code -1}
      * if operation is not supported. The returned value is not guaranteed to be exact accurate and
      * should be viewed as a best effort.
+     * 返回当前EventLoop注册的Channel数量
      */
     @UnstableApi
     public int registeredChannels() {
@@ -172,6 +182,7 @@ public abstract class SingleThreadEventLoop extends SingleThreadEventExecutor im
      * The returned value is not guaranteed to be exact accurate and
      * should be viewed as a best effort. This method is expected to be called from within
      * event loop.
+     * 注册的Channel的迭代器
      * @throws UnsupportedOperationException if operation is not supported by implementation.
      */
     @UnstableApi
@@ -179,6 +190,7 @@ public abstract class SingleThreadEventLoop extends SingleThreadEventExecutor im
         throw new UnsupportedOperationException("registeredChannelsIterator");
     }
 
+    //只读迭代器
     protected static final class ChannelsReadOnlyIterator<T extends Channel> implements Iterator<Channel> {
         private final Iterator<T> channelIterator;
 
@@ -201,11 +213,13 @@ public abstract class SingleThreadEventLoop extends SingleThreadEventExecutor im
             throw new UnsupportedOperationException("remove");
         }
 
+        //返回空的
         @SuppressWarnings("unchecked")
         public static <T> Iterator<T> empty() {
             return (Iterator<T>) EMPTY;
         }
 
+        //空的迭代器
         private static final Iterator<Object> EMPTY = new Iterator<Object>() {
             @Override
             public boolean hasNext() {
