@@ -30,6 +30,7 @@ import static io.netty.util.concurrent.AbstractEventExecutor.*;
  * Abstract base class for {@link EventExecutorGroup} implementations.
  */
 public abstract class AbstractEventExecutorGroup implements EventExecutorGroup {
+
     @Override
     public Future<?> submit(Runnable task) {
         return next().submit(task);

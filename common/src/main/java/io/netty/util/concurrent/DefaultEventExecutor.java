@@ -21,6 +21,7 @@ import java.util.concurrent.ThreadFactory;
 /**
  * Default {@link SingleThreadEventExecutor} implementation which just execute all submitted task in a
  * serial fashion.
+ * 默认实现
  */
 public final class DefaultEventExecutor extends SingleThreadEventExecutor {
 
@@ -48,19 +49,17 @@ public final class DefaultEventExecutor extends SingleThreadEventExecutor {
         super(parent, executor, true);
     }
 
-    public DefaultEventExecutor(EventExecutorGroup parent, ThreadFactory threadFactory, int maxPendingTasks,
-                                RejectedExecutionHandler rejectedExecutionHandler) {
+    public DefaultEventExecutor(EventExecutorGroup parent, ThreadFactory threadFactory, int maxPendingTasks, RejectedExecutionHandler rejectedExecutionHandler) {
         super(parent, threadFactory, true, maxPendingTasks, rejectedExecutionHandler);
     }
 
-    public DefaultEventExecutor(EventExecutorGroup parent, Executor executor, int maxPendingTasks,
-                                RejectedExecutionHandler rejectedExecutionHandler) {
+    public DefaultEventExecutor(EventExecutorGroup parent, Executor executor, int maxPendingTasks, RejectedExecutionHandler rejectedExecutionHandler) {
         super(parent, executor, true, maxPendingTasks, rejectedExecutionHandler);
     }
 
     @Override
     protected void run() {
-        for (;;) {
+        for (; ; ) {
             Runnable task = takeTask();
             if (task != null) {
                 runTask(task);

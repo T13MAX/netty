@@ -32,27 +32,35 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * {@link IoEventLoop} implementation that execute all its submitted tasks in a single thread using the provided
  * {@link IoHandler}.
+ * IoEventLoop实现类
  */
 public class SingleThreadIoEventLoop extends SingleThreadEventLoop implements IoEventLoop {
 
     // TODO: Is this a sensible default ?
-    private static final long DEFAULT_MAX_TASK_PROCESSING_QUANTUM_NS = TimeUnit.MILLISECONDS.toNanos(Math.max(100,
-            SystemPropertyUtil.getInt("io.netty.eventLoop.maxTaskProcessingQuantumMs", 1000)));
+    private static final long DEFAULT_MAX_TASK_PROCESSING_QUANTUM_NS = TimeUnit.MILLISECONDS.toNanos(Math.max(100, SystemPropertyUtil.getInt("io.netty.eventLoop.maxTaskProcessingQuantumMs", 1000)));
 
+    //最大执行时间
     private final long maxTaskProcessingQuantumNs;
+
+    //提供给底层 IO 轮询实现用的
     private final IoHandlerContext context = new IoHandlerContext() {
+        //判断当前线程是否可以阻塞
         @Override
         public boolean canBlock() {
+            //只有当前线程是事件循环线程
             assert inEventLoop();
+            //且 当前没有待处理任务和定时任务时
             return !hasTasks() && !hasScheduledTasks();
         }
 
+        //返回下一个定时任务还需要等待的时间
         @Override
         public long delayNanos(long currentTimeNanos) {
             assert inEventLoop();
             return SingleThreadIoEventLoop.this.delayNanos(currentTimeNanos);
         }
 
+        //返回下一个定时任务的截止时间(绝对时间)
         @Override
         public long deadlineNanos() {
             assert inEventLoop();
@@ -60,32 +68,33 @@ public class SingleThreadIoEventLoop extends SingleThreadEventLoop implements Io
         }
     };
 
+    //IO处理器 根据实现决定用NIO还是其他底层机制执行IO操作
     private final IoHandler ioHandler;
 
+    //当前注册在本EventLoop上的Channel数量 用于负载均衡等判断
     private final AtomicInteger numRegistrations = new AtomicInteger();
 
     /**
-     *  Creates a new instance
+     * Creates a new instance
      *
-     * @param parent            the parent that holds this {@link IoEventLoop}.
-     * @param threadFactory     the {@link ThreadFactory} that is used to create the underlying {@link Thread}.
-     * @param ioHandlerFactory  the {@link IoHandlerFactory} that should be used to obtain {@link IoHandler} to
-     *                          handle IO.
+     * @param parent           the parent that holds this {@link IoEventLoop}.
+     * @param threadFactory    the {@link ThreadFactory} that is used to create the underlying {@link Thread}.
+     * @param ioHandlerFactory the {@link IoHandlerFactory} that should be used to obtain {@link IoHandler} to
+     *                         handle IO.
      */
-    public SingleThreadIoEventLoop(IoEventLoopGroup parent, ThreadFactory threadFactory,
-                                   IoHandlerFactory ioHandlerFactory) {
+    public SingleThreadIoEventLoop(IoEventLoopGroup parent, ThreadFactory threadFactory, IoHandlerFactory ioHandlerFactory) {
         super(parent, threadFactory, false, true);
         this.maxTaskProcessingQuantumNs = DEFAULT_MAX_TASK_PROCESSING_QUANTUM_NS;
         this.ioHandler = ObjectUtil.checkNotNull(ioHandlerFactory, "ioHandlerFactory").newHandler(this);
     }
 
     /**
-     *  Creates a new instance
+     * Creates a new instance
      *
-     * @param parent            the parent that holds this {@link IoEventLoop}.
-     * @param executor          the {@link Executor} that is used for dispatching the work.
-     * @param ioHandlerFactory  the {@link IoHandlerFactory} that should be used to obtain {@link IoHandler} to
-     *                          handle IO.
+     * @param parent           the parent that holds this {@link IoEventLoop}.
+     * @param executor         the {@link Executor} that is used for dispatching the work.
+     * @param ioHandlerFactory the {@link IoHandlerFactory} that should be used to obtain {@link IoHandler} to
+     *                         handle IO.
      */
     public SingleThreadIoEventLoop(IoEventLoopGroup parent, Executor executor, IoHandlerFactory ioHandlerFactory) {
         super(parent, executor, false, true);
@@ -94,95 +103,87 @@ public class SingleThreadIoEventLoop extends SingleThreadEventLoop implements Io
     }
 
     /**
-     *  Creates a new instance
+     * Creates a new instance
      *
-     * @param parent                        the parent that holds this {@link IoEventLoop}.
-     * @param threadFactory                 the {@link ThreadFactory} that is used to create the underlying
-     *                                      {@link Thread}.
-     * @param ioHandlerFactory              the {@link IoHandlerFactory} that should be used to obtain {@link IoHandler}
-     *                                      to handle IO.
-     * @param maxPendingTasks               the maximum pending tasks that are allowed before
-     *                                      {@link RejectedExecutionHandler#rejected(Runnable,
-     *                                          SingleThreadEventExecutor)}
-     *                                      is called to handle it.
-     * @param rejectedExecutionHandler      the {@link RejectedExecutionHandler} that handles when more tasks are added
-     *                                      then allowed per {@code maxPendingTasks}.
-     * @param maxTaskProcessingQuantumMs    the maximum number of milliseconds that will be spent to run tasks before
-     *                                      trying to run IO again.
+     * @param parent                     the parent that holds this {@link IoEventLoop}.
+     * @param threadFactory              the {@link ThreadFactory} that is used to create the underlying
+     *                                   {@link Thread}.
+     * @param ioHandlerFactory           the {@link IoHandlerFactory} that should be used to obtain {@link IoHandler}
+     *                                   to handle IO.
+     * @param maxPendingTasks            the maximum pending tasks that are allowed before
+     *                                   {@link RejectedExecutionHandler#rejected(Runnable,
+     *                                   SingleThreadEventExecutor)}
+     *                                   is called to handle it.
+     * @param rejectedExecutionHandler   the {@link RejectedExecutionHandler} that handles when more tasks are added
+     *                                   then allowed per {@code maxPendingTasks}.
+     * @param maxTaskProcessingQuantumMs the maximum number of milliseconds that will be spent to run tasks before
+     *                                   trying to run IO again.
      */
-    public SingleThreadIoEventLoop(IoEventLoopGroup parent, ThreadFactory threadFactory,
-                                   IoHandlerFactory ioHandlerFactory, int maxPendingTasks,
-                                   RejectedExecutionHandler rejectedExecutionHandler, long maxTaskProcessingQuantumMs) {
+    public SingleThreadIoEventLoop(IoEventLoopGroup parent, ThreadFactory threadFactory, IoHandlerFactory ioHandlerFactory, int maxPendingTasks, RejectedExecutionHandler rejectedExecutionHandler, long maxTaskProcessingQuantumMs) {
         super(parent, threadFactory, false, true, maxPendingTasks, rejectedExecutionHandler);
-        this.maxTaskProcessingQuantumNs =
-                ObjectUtil.checkPositiveOrZero(maxTaskProcessingQuantumMs, "maxTaskProcessingQuantumMs") == 0 ?
-                        DEFAULT_MAX_TASK_PROCESSING_QUANTUM_NS :
-                        TimeUnit.MILLISECONDS.toNanos(maxTaskProcessingQuantumMs);
+        this.maxTaskProcessingQuantumNs = ObjectUtil.checkPositiveOrZero(maxTaskProcessingQuantumMs, "maxTaskProcessingQuantumMs") == 0 ? DEFAULT_MAX_TASK_PROCESSING_QUANTUM_NS : TimeUnit.MILLISECONDS.toNanos(maxTaskProcessingQuantumMs);
         this.ioHandler = ObjectUtil.checkNotNull(ioHandlerFactory, "ioHandlerFactory").newHandler(this);
     }
 
     /**
-     *  Creates a new instance
+     * Creates a new instance
      *
-     * @param parent                        the parent that holds this {@link IoEventLoop}.
-     * @param ioHandlerFactory              the {@link IoHandlerFactory} that should be used to obtain {@link IoHandler}
-     *                                      to handle IO.
-     * @param maxPendingTasks               the maximum pending tasks that are allowed before
-     *                                      {@link RejectedExecutionHandler#rejected(Runnable,
-     *                                          SingleThreadEventExecutor)}
-     *                                      is called to handle it.
-     * @param rejectedExecutionHandler      the {@link RejectedExecutionHandler} that handles when more tasks are added
-     *                                      then allowed per {@code maxPendingTasks}.
-     * @param maxTaskProcessingQuantumMs    the maximum number of milliseconds that will be spent to run tasks before
-     *                                      trying to run IO again.
+     * @param parent                     the parent that holds this {@link IoEventLoop}.
+     * @param ioHandlerFactory           the {@link IoHandlerFactory} that should be used to obtain {@link IoHandler}
+     *                                   to handle IO.
+     * @param maxPendingTasks            the maximum pending tasks that are allowed before
+     *                                   {@link RejectedExecutionHandler#rejected(Runnable,
+     *                                   SingleThreadEventExecutor)}
+     *                                   is called to handle it.
+     * @param rejectedExecutionHandler   the {@link RejectedExecutionHandler} that handles when more tasks are added
+     *                                   then allowed per {@code maxPendingTasks}.
+     * @param maxTaskProcessingQuantumMs the maximum number of milliseconds that will be spent to run tasks before
+     *                                   trying to run IO again.
      */
-    public SingleThreadIoEventLoop(IoEventLoopGroup parent, Executor executor,
-                                   IoHandlerFactory ioHandlerFactory, int maxPendingTasks,
-                                   RejectedExecutionHandler rejectedExecutionHandler,
-                                   long maxTaskProcessingQuantumMs) {
+    public SingleThreadIoEventLoop(IoEventLoopGroup parent, Executor executor, IoHandlerFactory ioHandlerFactory, int maxPendingTasks, RejectedExecutionHandler rejectedExecutionHandler, long maxTaskProcessingQuantumMs) {
         super(parent, executor, false, true, maxPendingTasks, rejectedExecutionHandler);
-        this.maxTaskProcessingQuantumNs =
-                ObjectUtil.checkPositiveOrZero(maxTaskProcessingQuantumMs, "maxTaskProcessingQuantumMs") == 0 ?
-                        DEFAULT_MAX_TASK_PROCESSING_QUANTUM_NS :
-                        TimeUnit.MILLISECONDS.toNanos(maxTaskProcessingQuantumMs);
+        this.maxTaskProcessingQuantumNs = ObjectUtil.checkPositiveOrZero(maxTaskProcessingQuantumMs, "maxTaskProcessingQuantumMs") == 0 ? DEFAULT_MAX_TASK_PROCESSING_QUANTUM_NS : TimeUnit.MILLISECONDS.toNanos(maxTaskProcessingQuantumMs);
         this.ioHandler = ObjectUtil.checkNotNull(ioHandlerFactory, "ioHandlerFactory").newHandler(this);
     }
 
     /**
+     * Creates a new instance
      *
-     *  Creates a new instance
-     *
-     * @param parent                    the parent that holds this {@link IoEventLoop}.
-     * @param executor                  the {@link Executor} that is used for dispatching the work.
-     * @param ioHandlerFactory          the {@link IoHandlerFactory} that should be used to obtain {@link IoHandler}
-     *                                  to handle IO.
-     * @param taskQueue                 the {@link Queue} used for storing pending tasks.
-     * @param tailTaskQueue             the {@link Queue} used for storing tail pending tasks.
-     * @param rejectedExecutionHandler  the {@link RejectedExecutionHandler} that handles when more tasks are added
-     *                                  then allowed.
+     * @param parent                   the parent that holds this {@link IoEventLoop}.
+     * @param executor                 the {@link Executor} that is used for dispatching the work.
+     * @param ioHandlerFactory         the {@link IoHandlerFactory} that should be used to obtain {@link IoHandler}
+     *                                 to handle IO.
+     * @param taskQueue                the {@link Queue} used for storing pending tasks.
+     * @param tailTaskQueue            the {@link Queue} used for storing tail pending tasks.
+     * @param rejectedExecutionHandler the {@link RejectedExecutionHandler} that handles when more tasks are added
+     *                                 then allowed.
      */
-    protected SingleThreadIoEventLoop(IoEventLoopGroup parent, Executor executor,
-                                      IoHandlerFactory ioHandlerFactory, Queue<Runnable> taskQueue,
-                                      Queue<Runnable> tailTaskQueue,
-                                      RejectedExecutionHandler rejectedExecutionHandler) {
+    protected SingleThreadIoEventLoop(IoEventLoopGroup parent, Executor executor, IoHandlerFactory ioHandlerFactory, Queue<Runnable> taskQueue, Queue<Runnable> tailTaskQueue, RejectedExecutionHandler rejectedExecutionHandler) {
         super(parent, executor, false, true, taskQueue, tailTaskQueue, rejectedExecutionHandler);
         this.maxTaskProcessingQuantumNs = DEFAULT_MAX_TASK_PROCESSING_QUANTUM_NS;
         this.ioHandler = ObjectUtil.checkNotNull(ioHandlerFactory, "ioHandlerFactory").newHandler(this);
     }
 
+    //核心执行逻辑 被 doStartThread() 启动线程后执行
     @Override
     protected void run() {
+
         assert inEventLoop();
+        // 初始化底层IO处理器 如NIO的selector等
         ioHandler.initialize();
         do {
+            // 执行IO读写逻辑
             runIo();
+
             if (isShuttingDown()) {
+                // 关闭前准备清理资源
                 ioHandler.prepareToDestroy();
             }
-            // Now run all tasks for the maximum configured amount of time before trying to run IO again.
+
+            // 执行任务队列里的任务 最长不超过maxTaskProcessingQuantumNs
             runAllTasks(maxTaskProcessingQuantumNs);
 
-            // We should continue with our loop until we either confirmed a shutdown or we can suspend it.
+            // 如果没有确认关闭 且不能挂起 则继续循环
         } while (!confirmShutdown() && !canSuspend());
     }
 
@@ -199,11 +200,12 @@ public class SingleThreadIoEventLoop extends SingleThreadEventLoop implements Io
     /**
      * Called when IO will be processed for all the {@link IoHandle}s on this {@link SingleThreadIoEventLoop}.
      * This method returns the number of {@link IoHandle}s for which IO was processed.
-     *
+     * <p>
      * This method must be called from the {@link EventLoop} thread.
      */
     protected int runIo() {
         assert inEventLoop();
+        //调用handler进行run
         return ioHandler.run(context);
     }
 
@@ -212,6 +214,7 @@ public class SingleThreadIoEventLoop extends SingleThreadEventLoop implements Io
         return this;
     }
 
+    //注册IO句柄
     @Override
     public final Future<IoRegistration> register(final IoHandle handle) {
         Promise<IoRegistration> promise = newPromise();
@@ -228,12 +231,15 @@ public class SingleThreadIoEventLoop extends SingleThreadEventLoop implements Io
         assert inEventLoop();
         final IoRegistration registration;
         try {
+            //注册!
             registration = ioHandler.register(handle);
         } catch (Exception e) {
             promise.setFailure(e);
             return;
         }
+        //递增
         numRegistrations.incrementAndGet();
+        //设置成功
         promise.setSuccess(new IoRegistrationWrapper(registration));
     }
 
@@ -265,12 +271,13 @@ public class SingleThreadIoEventLoop extends SingleThreadEventLoop implements Io
 
     protected static Queue<Runnable> newTaskQueue0(int maxPendingTasks) {
         // This event loop never calls takeTask()
-        return maxPendingTasks == Integer.MAX_VALUE ? PlatformDependent.<Runnable>newMpscQueue()
-                : PlatformDependent.<Runnable>newMpscQueue(maxPendingTasks);
+        return maxPendingTasks == Integer.MAX_VALUE ? PlatformDependent.<Runnable>newMpscQueue() : PlatformDependent.<Runnable>newMpscQueue(maxPendingTasks);
     }
 
+    //IO句柄注册成功包裹
     private final class IoRegistrationWrapper implements IoRegistration {
         private final IoRegistration registration;
+
         IoRegistrationWrapper(IoRegistration registration) {
             this.registration = registration;
         }

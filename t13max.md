@@ -1,4 +1,4 @@
-#         
+#            
 
 ## 重点包
 
@@ -167,6 +167,12 @@
 | `ChannelInitializer`            | Channel 初始化器，用户可自定义 pipeline 构建逻辑。           |
 | `ChannelOption`                 | Channel 可选配置项（如 TCP_NODELAY、SO_REUSEADDR 等）。 |
 | `AttributeKey`                  | 用于设置 Channel 的自定义属性。                         |
+
+#### 五
+
+- MultiThreadIoEventLoopGroup
+- SingleThreadIoEventLoop
+- IoHandler
 
 ---
 

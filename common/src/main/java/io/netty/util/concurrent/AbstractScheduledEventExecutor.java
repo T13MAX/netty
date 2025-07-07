@@ -203,6 +203,7 @@ public abstract class AbstractScheduledEventExecutor extends AbstractEventExecut
 
     /**
      * Fetch scheduled tasks from the internal queue and add these to the given {@link Queue}.
+     * 获取定时任务到指定任务队列
      *
      * @param taskQueue the task queue into which the fetched scheduled tasks should be transferred.
      * @return {@code true} if we were able to transfer everything, {@code false} if we need to call this method again
@@ -222,6 +223,7 @@ public abstract class AbstractScheduledEventExecutor extends AbstractEventExecut
             }
             if (!taskQueue.offer(scheduledTask)) {
                 // No space left in the task queue add it back to the scheduledTaskQueue so we pick it up again.
+                //没空间了 放回去 重新取
                 scheduledTaskQueue.add((ScheduledFutureTask<?>) scheduledTask);
                 return false;
             }
