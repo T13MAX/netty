@@ -52,70 +52,60 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
+ * NIO处理器
  * {@link IoHandler} implementation which register the {@link IoHandle}'s to a {@link Selector}.
  */
 public final class NioIoHandler implements IoHandler {
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(NioIoHandler.class);
-
-    private static final int CLEANUP_INTERVAL = 256; // XXX Hard-coded value, but won't need customization.
-
+    // 每处理 256 个 key 执行一次清理操作
+    private static final int CLEANUP_INTERVAL = 256;
+    // 是否禁用 selectedKeys 优化 从系统属性读取
     private static final boolean DISABLE_KEY_SET_OPTIMIZATION = SystemPropertyUtil.getBoolean("io.netty.noKeySetOptimization", false);
-
+    // selector 提前返回的最小次数
     private static final int MIN_PREMATURE_SELECTOR_RETURNS = 3;
+    // selector 自动重建的阈值
     private static final int SELECTOR_AUTO_REBUILD_THRESHOLD;
-
-    private final IntSupplier selectNowSupplier = new IntSupplier() {
-        @Override
-        public int get() throws Exception {
-            return selectNow();
-        }
-    };
-
-    // Workaround for JDK NIO bug.
-    //
-    // See:
-    // - https://bugs.openjdk.java.net/browse/JDK-6427854 for first few dev (unreleased) builds of JDK 7
-    // - https://bugs.openjdk.java.net/browse/JDK-6527572 for JDK prior to 5.0u15-rev and 6u10
-    // - https://github.com/netty/netty/issues/203
     static {
+        // 静态初始化代码块 读取系统配置初始化 SELECTOR_AUTO_REBUILD_THRESHOLD
         int selectorAutoRebuildThreshold = SystemPropertyUtil.getInt("io.netty.selectorAutoRebuildThreshold", 512);
         if (selectorAutoRebuildThreshold < MIN_PREMATURE_SELECTOR_RETURNS) {
             selectorAutoRebuildThreshold = 0;
         }
-
         SELECTOR_AUTO_REBUILD_THRESHOLD = selectorAutoRebuildThreshold;
-
         if (logger.isDebugEnabled()) {
             logger.debug("-Dio.netty.noKeySetOptimization: {}", DISABLE_KEY_SET_OPTIMIZATION);
             logger.debug("-Dio.netty.selectorAutoRebuildThreshold: {}", SELECTOR_AUTO_REBUILD_THRESHOLD);
         }
     }
 
-    /**
-     * The NIO {@link Selector}.
-     */
+    // 提供给 selectorLoop 用的 selectNow 逻辑封装
+    private final IntSupplier selectNowSupplier = new IntSupplier() {
+        @Override
+        public int get() throws Exception {
+            return selectNow();
+        }
+    };
+    // 包装后的 Selector 供内部使用
     private Selector selector;
+    // 原始未包装的 Selector
     private Selector unwrappedSelector;
+    // Netty 优化使用的 SelectionKey 数组 替代默认 Set
     private SelectedSelectionKeySet selectedKeys;
-
+    // SelectorProvider 一般是系统默认的 用于打开 Selector
     private final SelectorProvider provider;
-
-    /**
-     * Boolean that controls determines if a blocked Selector.select should
-     * break out of its selection process. In our case we use a timeout for
-     * the select method and the select method will block for that time unless
-     * waken up.
-     */
+    // 标记是否主动唤醒过 select 用于控制唤醒机制
     private final AtomicBoolean wakenUp = new AtomicBoolean();
-
+    // 控制 select 行为的策略类
     private final SelectStrategy selectStrategy;
+    // 提供线程感知能力的执行器封装
     private final ThreadAwareExecutor executor;
+    // 标记取消的 key 个数 用于触发清理
     private int cancelledKeys;
+    // 标记是否需要再次 select 一般用于处理过程中发生取消等情况
     private boolean needsToSelectAgain;
 
-    private NioIoHandler(ThreadAwareExecutor executor, SelectorProvider selectorProvider,
-                         SelectStrategy strategy) {
+    private NioIoHandler(ThreadAwareExecutor executor, SelectorProvider selectorProvider, SelectStrategy strategy) {
         this.executor = ObjectUtil.checkNotNull(executor, "executionContext");
         this.provider = ObjectUtil.checkNotNull(selectorProvider, "selectorProvider");
         this.selectStrategy = ObjectUtil.checkNotNull(strategy, "selectStrategy");
@@ -387,7 +377,7 @@ public final class NioIoHandler implements IoHandler {
         NioIoHandle nioHandle = nioHandle(handle);
         NioIoOps ops = NioIoOps.NONE;
         boolean selected = false;
-        for (;;) {
+        for (; ; ) {
             try {
                 return new DefaultNioRegistration(executor, nioHandle, ops, unwrappedSelector());
             } catch (CancelledKeyException e) {
@@ -512,7 +502,7 @@ public final class NioIoHandler implements IoHandler {
 
         Iterator<SelectionKey> i = selectedKeys.iterator();
         int handled = 0;
-        for (;;) {
+        for (; ; ) {
             final SelectionKey k = i.next();
             i.remove();
 
@@ -579,12 +569,12 @@ public final class NioIoHandler implements IoHandler {
         selectAgain();
         Set<SelectionKey> keys = selector.keys();
         Collection<DefaultNioRegistration> registrations = new ArrayList<>(keys.size());
-        for (SelectionKey k: keys) {
+        for (SelectionKey k : keys) {
             DefaultNioRegistration handle = (DefaultNioRegistration) k.attachment();
             registrations.add(handle);
         }
 
-        for (DefaultNioRegistration reg: registrations) {
+        for (DefaultNioRegistration reg : registrations) {
             reg.close();
         }
     }
@@ -612,7 +602,7 @@ public final class NioIoHandler implements IoHandler {
             long currentTimeNanos = System.nanoTime();
             long selectDeadLineNanos = currentTimeNanos + runner.delayNanos(currentTimeNanos);
 
-            for (;;) {
+            for (; ; ) {
                 long timeoutMillis = (selectDeadLineNanos - currentTimeNanos + 500000L) / 1000000L;
                 if (timeoutMillis <= 0) {
                     if (selectCnt == 0) {
@@ -633,7 +623,7 @@ public final class NioIoHandler implements IoHandler {
                 }
 
                 int selectedKeys = selector.select(timeoutMillis);
-                selectCnt ++;
+                selectCnt++;
 
                 if (selectedKeys != 0 || oldWakenUp || wakenUp.get() || !runner.canBlock()) {
                     // - Selected something,
@@ -735,7 +725,7 @@ public final class NioIoHandler implements IoHandler {
     /**
      * Returns a new {@link IoHandlerFactory} that creates {@link NioIoHandler} instances.
      *
-     * @param selectorProvider          the {@link SelectorProvider} to use.
+     * @param selectorProvider the {@link SelectorProvider} to use.
      * @return factory                  the {@link IoHandlerFactory}.
      */
     public static IoHandlerFactory newFactory(SelectorProvider selectorProvider) {
@@ -745,14 +735,14 @@ public final class NioIoHandler implements IoHandler {
     /**
      * Returns a new {@link IoHandlerFactory} that creates {@link NioIoHandler} instances.
      *
-     * @param selectorProvider          the {@link SelectorProvider} to use.
-     * @param selectStrategyFactory     the {@link SelectStrategyFactory} to use.
+     * @param selectorProvider      the {@link SelectorProvider} to use.
+     * @param selectStrategyFactory the {@link SelectStrategyFactory} to use.
      * @return factory                  the {@link IoHandlerFactory}.
      */
     public static IoHandlerFactory newFactory(final SelectorProvider selectorProvider,
                                               final SelectStrategyFactory selectStrategyFactory) {
         ObjectUtil.checkNotNull(selectorProvider, "selectorProvider");
         ObjectUtil.checkNotNull(selectStrategyFactory, "selectStrategyFactory");
-        return context ->  new NioIoHandler(context, selectorProvider, selectStrategyFactory.newSelectStrategy());
+        return context -> new NioIoHandler(context, selectorProvider, selectStrategyFactory.newSelectStrategy());
     }
 }

@@ -25,6 +25,10 @@ import java.security.PrivilegedAction;
 
 /**
  * A collection of utility methods to retrieve and parse the values of the Java system properties.
+ * 读取 JVM 启动参数 比读取配置文件更快更简单
+ * 适合控制一些 全局性行为
+ * 例如是否启用优化 阈值设置 等等 而不是业务级配置
+ * 启动即生效 不需要解析配置文件 任意项目都能统一配置 对测试和调优非常方便
  */
 public final class SystemPropertyUtil {
 
@@ -54,8 +58,8 @@ public final class SystemPropertyUtil {
      * the property access fails.
      *
      * @return the property value.
-     *         {@code def} if there's no such property or if an access to the
-     *         specified property is not allowed.
+     * {@code def} if there's no such property or if an access to the
+     * specified property is not allowed.
      */
     public static String get(final String key, String def) {
         checkNonEmpty(key, "key");
@@ -89,8 +93,8 @@ public final class SystemPropertyUtil {
      * the property access fails.
      *
      * @return the property value.
-     *         {@code def} if there's no such property or if an access to the
-     *         specified property is not allowed.
+     * {@code def} if there's no such property or if an access to the
+     * specified property is not allowed.
      */
     public static boolean getBoolean(String key, boolean def) {
         String value = get(key);
@@ -125,8 +129,8 @@ public final class SystemPropertyUtil {
      * the property access fails.
      *
      * @return the property value.
-     *         {@code def} if there's no such property or if an access to the
-     *         specified property is not allowed.
+     * {@code def} if there's no such property or if an access to the
+     * specified property is not allowed.
      */
     public static int getInt(String key, int def) {
         String value = get(key);
@@ -155,8 +159,8 @@ public final class SystemPropertyUtil {
      * the property access fails.
      *
      * @return the property value.
-     *         {@code def} if there's no such property or if an access to the
-     *         specified property is not allowed.
+     * {@code def} if there's no such property or if an access to the
+     * specified property is not allowed.
      */
     public static long getLong(String key, long def) {
         String value = get(key);

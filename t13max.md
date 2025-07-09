@@ -172,7 +172,8 @@
 
 - MultiThreadIoEventLoopGroup
 - SingleThreadIoEventLoop
-- IoHandler
+- NioIoHandler
+- EpollIoHandler
 
 ---
 
